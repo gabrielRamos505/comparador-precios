@@ -6,5 +6,5 @@ set -o errexit
 npm install
 
 # Instalar navegador Chrome para Puppeteer
-# Esto lo descarga en /opt/render/.cache/puppeteer por defecto en Render
-npx puppeteer browsers install chrome
+# Usamos la ruta directa al binario instalado localmente para evitar problemas de permisos con npx
+./node_modules/.bin/puppeteer browsers install chrome
