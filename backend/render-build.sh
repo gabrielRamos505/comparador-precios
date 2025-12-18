@@ -6,5 +6,6 @@ set -o errexit
 npm install
 
 # Instalar navegador Chrome para Puppeteer
-# Usamos la ruta directa al binario instalado localmente para evitar problemas de permisos con npx
+# Forzar permisos de ejecución en el binario de puppeteer para evitar "Permission denied"
+chmod +x ./node_modules/.bin/puppeteer
 ./node_modules/.bin/puppeteer browsers install chrome
