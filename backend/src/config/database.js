@@ -11,11 +11,10 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
         idle: 10000,
     },
     dialectOptions: {
-        ssl: process.env.DB_SSL === 'true' ? { require: true, rejectUnauthorized: false } : false,
+        ssl: false, // Con Render Postgres interno no hace falta SSL
     },
 });
 
-// Verificar conexión
 const testConnection = async () => {
     try {
         await sequelize.authenticate();
