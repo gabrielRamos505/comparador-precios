@@ -215,23 +215,22 @@ class ProductAggregatorService {
         ];
 
         const processBatch = async (batch, query) => {
-            const promises = batch.map(async (store) => {
+            const batchResults = [];
+            for (const store of batch) {
                 try {
                     console.log(`   👉 Consultando ${store.name}...`);
                     const products = await store.scraper.searchProducts(query);
                     if (products.length > 0) {
                         console.log(`      ✅ ${store.name}: ${products.length} encontrados`);
-                        return products;
+                        batchResults.push(...products);
                     } else {
                         console.log(`      ⚠️ ${store.name}: Sin resultados`);
-                        return [];
                     }
                 } catch (error) {
                     console.error(`      ❌ Error en ${store.name}: ${error.message}`);
-                    return [];
                 }
-            });
-            return Promise.all(promises);
+            }
+            return batchResults;
         };
 
         const results1 = await processBatch(batch1, productName);
