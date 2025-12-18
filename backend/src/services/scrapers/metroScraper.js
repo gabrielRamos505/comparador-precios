@@ -65,6 +65,17 @@ class MetroScraper {
 
             const page = await browser.newPage();
 
+            // ✅ ACELERACIÓN: Bloquear recursos innecesarios
+            await page.setRequestInterception(true);
+            page.on('request', (req) => {
+                const resourceType = req.resourceType();
+                if (['image', 'font', 'stylesheet', 'media', 'other'].includes(resourceType)) {
+                    req.abort();
+                } else {
+                    req.continue();
+                }
+            });
+
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             await page.setViewport({ width: 1366, height: 768 });
 
@@ -78,11 +89,10 @@ class MetroScraper {
             const searchUrl = `${this.baseUrl}/${keywords}?_q=${keywords}&map=ft`;
             console.log(`      📍 URL: ${searchUrl}`);
 
-            // 1. CAMBIO IMPORTANTE: Usar domcontentloaded en lugar de networkidle0
-            // Esto evita que el script espere a que terminen los trackers de analítica
+            // 1. CAMBIO CRÍTICO: Carga rápida (load) + Bloqueo de recursos
             await page.goto(searchUrl, {
-                waitUntil: 'networkidle2',
-                timeout: 60000
+                waitUntil: 'load',
+                timeout: 30000
             });
 
             // 2. Esperar explícitamente al contenedor de productos (Versión genérica VTEX)

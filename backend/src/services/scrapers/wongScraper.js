@@ -64,6 +64,17 @@ class WongScraper {
 
             const page = await browser.newPage();
 
+            // ✅ ACELERACIÓN: Bloquear recursos innecesarios
+            await page.setRequestInterception(true);
+            page.on('request', (req) => {
+                const resourceType = req.resourceType();
+                if (['image', 'font', 'stylesheet', 'media', 'other'].includes(resourceType)) {
+                    req.abort();
+                } else {
+                    req.continue();
+                }
+            });
+
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             await page.setViewport({ width: 1366, height: 768 });
 
@@ -75,10 +86,10 @@ class WongScraper {
             const searchUrl = `${this.baseUrl}/${keywords}?_q=${keywords}&map=ft`;
             console.log(`      📍 URL: ${searchUrl}`);
 
-            // 1. Navegación rápida (sin esperar trackers)
+            // 1. Navegación rápida (load) + Bloqueo de recursos
             await page.goto(searchUrl, {
-                waitUntil: 'networkidle2',
-                timeout: 60000
+                waitUntil: 'load',
+                timeout: 30000
             });
 
             // 2. Esperar selectores genéricos de VTEX
