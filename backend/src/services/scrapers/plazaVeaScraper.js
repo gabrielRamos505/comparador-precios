@@ -71,10 +71,10 @@ class PlazaVeaScraper {
             const searchUrl = `${this.baseUrl}/${keywords}?_q=${keywords}&map=ft`;
             console.log(`      📍 URL: ${searchUrl}`);
 
-            // 1. Optimización de carga: No esperar a networkidle0 (muy lento en sitios pesados)
+            // 1. Optimización de carga: networkidle2 para asegurar renderizado dinámico
             await page.goto(searchUrl, {
-                waitUntil: 'domcontentloaded',
-                timeout: 30000
+                waitUntil: 'networkidle2',
+                timeout: 60000
             });
 
             // 2. Esperar selector genérico de VTEX (funciona en Plaza Vea, Vivanda, Promart, etc.)
@@ -106,21 +106,21 @@ class PlazaVeaScraper {
             // 3. Extracción de datos con selectores actualizados
             const products = await page.evaluate(() => {
                 const items = [];
-                // Selector para Plaza Vea
-                const cards = document.querySelectorAll('.Showcase');
+                // Selectores actualizados para Plaza Vea (VTEX)
+                const containers = document.querySelectorAll('.vtex-product-summary-2-x-container, .Showcase');
 
-                if (cards.length === 0) return [];
+                if (containers.length === 0) return [];
 
-                cards.forEach((card, index) => {
+                containers.forEach((container, index) => {
                     if (index >= 8) return;
 
                     try {
-                        // Nombre
-                        const nameEl = card.querySelector('.Showcase__name');
+                        // Nombre (Prioridad a vtex-brandName)
+                        const nameEl = container.querySelector('.vtex-product-summary-2-x-brandName, .Showcase__name');
                         const name = nameEl ? nameEl.textContent.trim() : null;
 
-                        // Precio
-                        const priceEl = card.querySelector('.Showcase__salePrice') || card.querySelector('.Showcase__price--sale');
+                        // Precio (Selling Price o Showcase sale)
+                        const priceEl = container.querySelector('.vtex-product-price-1-x-sellingPriceValue, .Showcase__salePrice, .Showcase__price--sale');
                         let price = 0;
                         if (priceEl) {
                             const priceText = priceEl.textContent.replace(/[^\d.]/g, '');
@@ -128,12 +128,12 @@ class PlazaVeaScraper {
                         }
 
                         // URL
-                        const linkEl = card.querySelector('.Showcase__link');
+                        const linkEl = container.querySelector('a[class*="clearLink"], .Showcase__link');
                         const url = linkEl ? linkEl.href : null;
 
                         // Imagen
-                        const imgEl = card.querySelector('.Showcase__image') || card.querySelector('img');
-                        const imageUrl = imgEl ? (imgEl.src || imgEl.dataset.src) : null;
+                        const imgEl = container.querySelector('img.vtex-product-summary-2-x-image, .Showcase__image, img');
+                        const imageUrl = imgEl ? (imgEl.src || imgEl.getAttribute('data-src') || imgEl.dataset.src) : null;
 
                         if (name && price > 0) {
                             items.push({ name, price, url, imageUrl });

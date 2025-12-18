@@ -214,11 +214,11 @@ class ProductAggregatorService {
             { name: 'Tottus', scraper: tottusScraper }
         ];
 
-        const processBatch = async (batch) => {
+        const processBatch = async (batch, query) => {
             const promises = batch.map(async (store) => {
                 try {
                     console.log(`   👉 Consultando ${store.name}...`);
-                    const products = await store.scraper.searchProducts(productName);
+                    const products = await store.scraper.searchProducts(query);
                     if (products.length > 0) {
                         console.log(`      ✅ ${store.name}: ${products.length} encontrados`);
                         return products;
@@ -234,11 +234,24 @@ class ProductAggregatorService {
             return Promise.all(promises);
         };
 
-        const results1 = await processBatch(batch1);
+        const results1 = await processBatch(batch1, productName);
         results.push(...results1.flat());
 
-        const results2 = await processBatch(batch2);
+        const results2 = await processBatch(batch2, productName);
         results.push(...results2.flat());
+
+        // REINTENTO CON QUERY CORTA: Si no hay resultados en supermercados peruanos
+        if (results.length === 0) {
+            const shortName = productName.split(' ').slice(0, 2).join(' ');
+            if (shortName.length >= 3 && shortName.toLowerCase() !== productName.toLowerCase()) {
+                console.log(`\n🔄 Sin resultados en tiendas. Reintentando con query más corta: "${shortName}"...`);
+                const resultsRetry1 = await processBatch(batch1.map(s => ({ ...s, name: s.name + ' (Retry)' })), shortName);
+                results.push(...resultsRetry1.flat());
+
+                const resultsRetry2 = await processBatch(batch2.map(s => ({ ...s, name: s.name + ' (Retry)' })), shortName);
+                results.push(...resultsRetry2.flat());
+            }
+        }
 
         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
         console.log(`   ⏱️ Scraping finalizado en ${duration}s. Total items: ${results.length}`);

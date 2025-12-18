@@ -77,8 +77,8 @@ class WongScraper {
 
             // 1. Navegación rápida (sin esperar trackers)
             await page.goto(searchUrl, {
-                waitUntil: 'domcontentloaded',
-                timeout: 30000
+                waitUntil: 'networkidle2',
+                timeout: 60000
             });
 
             // 2. Esperar selectores genéricos de VTEX

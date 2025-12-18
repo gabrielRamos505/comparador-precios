@@ -80,8 +80,8 @@ class TottusScraper {
 
             // 1. Evitar Timeout esperando trackers
             await page.goto(searchUrl, {
-                waitUntil: 'domcontentloaded',
-                timeout: 30000
+                waitUntil: 'networkidle2',
+                timeout: 60000
             });
 
             // 2. Esperar selectores (Soporta estructura antigua y nueva de Tottus)

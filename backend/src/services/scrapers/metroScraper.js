@@ -81,8 +81,8 @@ class MetroScraper {
             // 1. CAMBIO IMPORTANTE: Usar domcontentloaded en lugar de networkidle0
             // Esto evita que el script espere a que terminen los trackers de analítica
             await page.goto(searchUrl, {
-                waitUntil: 'domcontentloaded',
-                timeout: 30000
+                waitUntil: 'networkidle2',
+                timeout: 60000
             });
 
             // 2. Esperar explícitamente al contenedor de productos (Versión genérica VTEX)
