@@ -25,10 +25,16 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "google-search-results-nodejs": "^2.1.0",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.0.1",
+    "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
     "pg": "^8.16.3",
     "pg-hstore": "^2.3.4",
+    "puppeteer": "^24.33.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "puppeteer-proxy": "^1.0.3",
     "sequelize": "^6.37.7"
   },
   "devDependencies": {

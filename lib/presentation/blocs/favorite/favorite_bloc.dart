@@ -1,12 +1,12 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../data/repositories/favorite_repository.dart';
 import 'favorite_event.dart';
 import 'favorite_state.dart';
-import '../../../data/repositories/favorite_repository.dart';
 
 class FavoriteBloc extends Bloc<FavoriteEvent, FavoriteState> {
-  final FavoriteRepository _favoriteRepository;
+  final FavoriteRepository _repository;
 
-  FavoriteBloc(this._favoriteRepository) : super(FavoriteInitial()) {
+  FavoriteBloc(this._repository) : super(FavoriteInitial()) {
     on<LoadFavorites>(_onLoadFavorites);
     on<AddFavorite>(_onAddFavorite);
     on<RemoveFavorite>(_onRemoveFavorite);
@@ -20,8 +20,8 @@ class FavoriteBloc extends Bloc<FavoriteEvent, FavoriteState> {
     emit(FavoriteLoading());
     
     try {
-      final favorites = await _favoriteRepository.getFavorites(event.userId);
-      emit(FavoritesLoaded(favorites));
+      final favorites = await _repository.getUserFavorites();
+      emit(FavoritesLoaded(favorites)); // ✅ CORRECTO: FavoritesLoaded (con 's')
     } catch (e) {
       emit(FavoriteError(e.toString()));
     }
@@ -32,19 +32,16 @@ class FavoriteBloc extends Bloc<FavoriteEvent, FavoriteState> {
     Emitter<FavoriteState> emit,
   ) async {
     try {
-      final favorite = await _favoriteRepository.addFavorite(
-        userId: event.userId,
-        productId: event.productId,
-        productName: event.productName,
-        barcode: event.barcode,
-        imageUrl: event.imageUrl,
-        lowestPrice: event.lowestPrice,
+      final success = await _repository.addFavorite(
+        event.barcode,
+        event.name,
+        event.imageUrl,
       );
       
-      emit(FavoriteAdded(favorite));
-      
-      // Recargar lista
-      add(LoadFavorites(event.userId));
+      if (success) {
+        // Recargar favoritos
+        add(LoadFavorites());
+      }
     } catch (e) {
       emit(FavoriteError(e.toString()));
     }
@@ -55,11 +52,12 @@ class FavoriteBloc extends Bloc<FavoriteEvent, FavoriteState> {
     Emitter<FavoriteState> emit,
   ) async {
     try {
-      await _favoriteRepository.removeFavorite(event.userId, event.productId);
-      emit(FavoriteRemoved());
+      final success = await _repository.removeFavorite(event.barcode);
       
-      // Recargar lista
-      add(LoadFavorites(event.userId));
+      if (success) {
+        // Recargar favoritos
+        add(LoadFavorites());
+      }
     } catch (e) {
       emit(FavoriteError(e.toString()));
     }
@@ -70,13 +68,10 @@ class FavoriteBloc extends Bloc<FavoriteEvent, FavoriteState> {
     Emitter<FavoriteState> emit,
   ) async {
     try {
-      final isFavorite = await _favoriteRepository.isFavorite(
-        event.userId,
-        event.productId,
-      );
-      emit(FavoriteChecked(isFavorite));
+      final isFav = await _repository.isFavorite(event.barcode);
+      emit(FavoriteChecked(isFav)); // ✅ Emitir estado de verificación
     } catch (e) {
-      emit(FavoriteChecked(false));
+      print('Error verificando favorito: $e');
     }
   }
 }

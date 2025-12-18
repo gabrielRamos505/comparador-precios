@@ -8,6 +8,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
   AuthBloc(this._authRepository) : super(AuthInitial()) {
     on<AppStarted>(_onAppStarted);
+    on<CheckAuthStatus>(_onCheckAuthStatus);
     on<LoginRequested>(_onLoginRequested);
     on<RegisterRequested>(_onRegisterRequested);
     on<LogoutRequested>(_onLogoutRequested);
@@ -19,17 +20,38 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   ) async {
     emit(AuthLoading());
     
-    final isLoggedIn = await _authRepository.isLoggedIn();
+    // Intentar restaurar sesión con token guardado
+    final user = await _authRepository.verifyToken();
     
-    if (isLoggedIn) {
-      final user = await _authRepository.getCurrentUser();
-      if (user != null) {
-        emit(Authenticated(user));
-      } else {
-        emit(Unauthenticated());
-      }
+    if (user != null) {
+      emit(Authenticated(user));
+      print('✅ Sesión restaurada automáticamente');
     } else {
       emit(Unauthenticated());
+      print('⚠️ No hay sesión activa');
+    }
+  }
+
+  Future<void> _onCheckAuthStatus(
+    CheckAuthStatus event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+
+    try {
+      // Intentar restaurar sesión con token guardado
+      final user = await _authRepository.verifyToken();
+
+      if (user != null) {
+        emit(Authenticated(user));
+        print('✅ Sesión restaurada automáticamente');
+      } else {
+        emit(Unauthenticated());
+        print('⚠️ No hay sesión activa');
+      }
+    } catch (e) {
+      emit(Unauthenticated());
+      print('❌ Error verificando sesión: $e');
     }
   }
 

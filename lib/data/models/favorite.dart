@@ -8,7 +8,7 @@ class Favorite extends Equatable {
   final String barcode;
   final String? imageUrl;
   final double? lowestPrice;
-  final DateTime createdAt;
+  final DateTime addedAt;
 
   const Favorite({
     required this.id,
@@ -18,19 +18,19 @@ class Favorite extends Equatable {
     required this.barcode,
     this.imageUrl,
     this.lowestPrice,
-    required this.createdAt,
+    required this.addedAt,
   });
 
   factory Favorite.fromJson(Map<String, dynamic> json) {
     return Favorite(
-      id: json['id'] ?? '',
-      userId: json['userId'] ?? '',
-      productId: json['productId'] ?? '',
-      productName: json['productName'] ?? '',
+      id: json['id']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? json['user_id']?.toString() ?? '',
+      productId: json['productId']?.toString() ?? json['product_id']?.toString() ?? '',
+      productName: json['productName'] ?? json['name'] ?? '',
       barcode: json['barcode'] ?? '',
-      imageUrl: json['imageUrl'],
-      lowestPrice: json['lowestPrice']?.toDouble(),
-      createdAt: DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
+      imageUrl: json['imageUrl'] ?? json['image_url'],
+      lowestPrice: json['lowestPrice']?.toDouble() ?? json['price']?.toDouble(),
+      addedAt: DateTime.parse(json['addedAt'] ?? json['added_at'] ?? DateTime.now().toIso8601String()),
     );
   }
 
@@ -43,7 +43,7 @@ class Favorite extends Equatable {
       'barcode': barcode,
       'imageUrl': imageUrl,
       'lowestPrice': lowestPrice,
-      'createdAt': createdAt.toIso8601String(),
+      'addedAt': addedAt.toIso8601String(),
     };
   }
 
@@ -56,6 +56,6 @@ class Favorite extends Equatable {
         barcode,
         imageUrl,
         lowestPrice,
-        createdAt,
+        addedAt,
       ];
 }

@@ -13,7 +13,7 @@ class User extends Equatable {
 
   factory User.fromJson(Map<String, dynamic> json) {
     return User(
-      id: json['userId'] ?? json['id'] ?? '',
+      id: json['id']?.toString() ?? '', // ✅ Convertir a String
       email: json['email'] ?? '',
       name: json['name'],
     );
@@ -78,12 +78,16 @@ class AuthResponse {
     this.name,
   });
 
+  // ✅ CORREGIDO: Ahora procesa correctamente la respuesta del backend
   factory AuthResponse.fromJson(Map<String, dynamic> json) {
+    // El backend envía: { success: true, token: "...", user: { id, email, name } }
+    final userData = json['user'] ?? json;
+    
     return AuthResponse(
-      userId: json['userId'] ?? json['id'] ?? '',
-      email: json['email'] ?? '',
+      userId: (userData['id'] ?? userData['userId'] ?? '').toString(),
+      email: userData['email'] ?? '',
       token: json['token'] ?? '',
-      name: json['name'],
+      name: userData['name'],
     );
   }
 

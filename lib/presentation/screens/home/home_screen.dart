@@ -15,9 +15,14 @@ class HomeScreen extends StatelessWidget {
         final user = state is Authenticated ? state.user : null;
 
         return Scaffold(
-          appBar: AppBar(
+            appBar: AppBar(
             title: const Text('Comparador RA'),
             actions: [
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined),
+                tooltip: 'Notificaciones',
+                onPressed: () => context.push('/notifications'),
+              ),
               IconButton(
                 icon: const Icon(Icons.logout),
                 tooltip: 'Cerrar sesión',

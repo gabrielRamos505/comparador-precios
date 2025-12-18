@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const aiController = require('../controllers/aiController');
+const { optionalAuth } = require('../middleware/authMiddleware');
 
-// POST /api/ai/identify - Identificar producto por foto
-router.post('/identify', aiController.identifyAndSearch);
+// Solo identifica qué es, pero no busca precios en tiendas (útil para debugging)
+router.post('/identify-only', optionalAuth, aiController.identifyAndSearch);
 
 module.exports = router;

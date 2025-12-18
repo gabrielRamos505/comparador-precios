@@ -1,33 +1,39 @@
 class AppConstants {
-  // ⭐ Base URLs - ACTUALIZADO con nueva IP
+  // ⭐ Base URLs
   static const String backendUrl = 'http://192.168.100.14:3000/api';
-  static const String baseUrl = 'http://192.168.100.14:3000/api';
   
+  // Como usas 'baseUrl' en algunos lados y 'backendUrl' en otros,
+  // es mejor que una apunte a la otra para no confundirte.
+  static const String baseUrl = backendUrl; 
+ 
   // Config
   static const bool useMockData = false;
-  
-  // Timeouts
-  static const Duration apiTimeout = Duration(seconds: 30);
-  static const Duration connectionTimeout = Duration(seconds: 30);
-  static const Duration receiveTimeout = Duration(seconds: 30);
-  
+ 
+  // ⚠️ CORRECCIÓN CRÍTICA: Timeouts aumentados
+  // El scraping puede tardar ~50s, así que ponemos 90s para evitar errores.
+  static const Duration apiTimeout = Duration(seconds: 90);
+  static const Duration connectionTimeout = Duration(seconds: 60);
+  static const Duration receiveTimeout = Duration(seconds: 90); 
+ 
   // Keys para SharedPreferences
   static const String tokenKey = 'auth_token';
   static const String userKey = 'user_data';
-  static const String keyToken = 'auth_token';
+  
+  // Mapeamos las duplicadas para evitar errores si usas librerías viejas
+  static const String keyToken = tokenKey; 
   static const String keyUserId = 'user_id';
   static const String keyEmail = 'user_email';
   static const String keyUserName = 'user_name';
-  
+ 
   // Keys para Features
   static const String searchHistoryKey = 'search_history';
   static const String favoritesKey = 'favorites';
   static const String priceAlertsKey = 'price_alerts';
-  
+ 
   // Configuración de la app
   static const String appName = 'AR Shopping';
   static const String appVersion = '1.0.0';
-  
+ 
   // Límites
   static const int maxSearchHistoryItems = 50;
   static const int maxFavoriteItems = 100;

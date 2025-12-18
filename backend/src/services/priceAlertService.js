@@ -1,131 +1,128 @@
-const { PriceAlert, Product } = require('../models');
+const PriceAlert = require('../models/PriceAlert');
+const Product = require('../models/Product');
+const notificationService = require('./notificationService'); // ✅ Conexión con notificaciones
 
 class PriceAlertService {
-    // Crear alerta de precio
-    async createAlert(userId, productData, barcode, platform, targetPrice) {
-        try {
-            // 1. Buscar o crear el producto
-            let product = await Product.findOne({ where: { barcode } });
 
-            if (!product) {
-                product = await Product.create({
-                    barcode: productData.barcode || barcode,
-                    name: productData.name,
-                    brand: productData.brand,
-                    category: productData.category,
-                    image_url: productData.imageUrl,
-                    description: productData.description,
-                });
+    async getUserAlerts(userId, activeOnly = false, page = 1, limit = 20) {
+        try {
+            const offset = (page - 1) * limit;
+            const whereClause = { user_id: userId };
+
+            if (activeOnly) {
+                whereClause.status = 'active';
             }
 
-            // 2. Crear alerta
+            const { count, rows } = await PriceAlert.findAndCountAll({
+                where: whereClause,
+                include: [{
+                    model: Product,
+                    as: 'Product',
+                    attributes: ['id', 'name', 'image_url', 'barcode']
+                }],
+                limit,
+                offset,
+                order: [['created_at', 'DESC']]
+            });
+
+            return { total: count, alerts: rows };
+        } catch (error) {
+            console.error('Error getting user alerts:', error);
+            throw error;
+        }
+    }
+
+    async createAlert({ userId, productData, barcode, platform, targetPrice, currentPrice }) {
+        try {
+            // 1. Asegurar que el producto existe
+            const [product] = await Product.findOrCreate({
+                where: { barcode },
+                defaults: {
+                    name: productData.name,
+                    image_url: productData.imageUrl,
+                    brand: productData.brand,
+                    category: 'General'
+                }
+            });
+
+            // 2. Verificar si ya existe una alerta ACTIVA para este producto/tienda
+            const existingAlert = await PriceAlert.findOne({
+                where: {
+                    user_id: userId,
+                    product_id: product.id,
+                    platform: platform,
+                    status: 'active'
+                }
+            });
+
+            if (existingAlert) {
+                throw new Error(`Ya tienes una alerta activa para este producto en ${platform}`);
+            }
+
+            // 3. Crear Alerta
             const alert = await PriceAlert.create({
                 user_id: userId,
                 product_id: product.id,
                 platform: platform,
                 target_price: targetPrice,
-                current_price: null,
-                is_active: true,
-                notified: false,
+                initial_price: currentPrice || targetPrice, // Precio original de referencia
+                status: 'active'
             });
 
             return alert;
+
         } catch (error) {
-            console.error('Error creating price alert:', error);
+            console.error('Error creating alert:', error);
             throw error;
         }
     }
 
-    // Obtener alertas del usuario
-    async getUserAlerts(userId, activeOnly = false) {
+    /**
+     * ✅ Lógica central: Verificar si el nuevo precio activa la alerta
+     */
+    async checkAndTriggerAlert(alertId, newPrice) {
         try {
-            const where = { user_id: userId };
-            if (activeOnly) {
-                where.is_active = true;
-            }
-
-            const alerts = await PriceAlert.findAll({
-                where,
-                include: [
-                    {
-                        model: Product,
-                        attributes: ['id', 'barcode', 'name', 'brand', 'image_url'],
-                    },
-                ],
-                order: [['created_at', 'DESC']],
+            const alert = await PriceAlert.findByPk(alertId, {
+                include: [{ model: Product, as: 'Product' }]
             });
 
-            return alerts;
+            if (!alert) return null;
+
+            // Si el nuevo precio es menor o igual al objetivo
+            if (newPrice <= alert.target_price) {
+
+                // 1. Actualizar estado
+                alert.status = 'triggered';
+                await alert.save();
+
+                // 2. 🔔 ENVIAR NOTIFICACIÓN AL USUARIO
+                const title = `¡Bajada de precio! 📉`;
+                const message = `El producto "${alert.Product.name}" ha bajado a S/ ${newPrice} en ${alert.platform}. ¡Aprovecha ahora!`;
+
+                await notificationService.createNotification(
+                    alert.user_id,
+                    title,
+                    message,
+                    'price_drop'
+                );
+
+                console.log(`✅ Alerta disparada para usuario ${alert.user_id}`);
+                return { triggered: true, alert };
+            }
+
+            return { triggered: false, alert };
+
         } catch (error) {
-            console.error('Error getting alerts:', error);
+            console.error('Error checking alert:', error);
             throw error;
         }
     }
 
-    // Actualizar precio actual de la alerta
-    async updateAlertPrice(alertId, currentPrice) {
-        try {
-            const alert = await PriceAlert.findByPk(alertId);
-
-            if (!alert) {
-                return null;
-            }
-
-            alert.current_price = currentPrice;
-
-            // Si el precio actual es menor o igual al objetivo, notificar
-            if (currentPrice <= alert.target_price && !alert.notified) {
-                alert.notified = true;
-                console.log(`🔔 Price alert triggered for alert ${alertId}`);
-            }
-
-            await alert.save();
-            return alert;
-        } catch (error) {
-            console.error('Error updating alert price:', error);
-            throw error;
-        }
-    }
-
-    // Desactivar alerta
-    async deactivateAlert(userId, alertId) {
-        try {
-            const alert = await PriceAlert.findOne({
-                where: {
-                    id: alertId,
-                    user_id: userId,
-                },
-            });
-
-            if (!alert) {
-                return false;
-            }
-
-            alert.is_active = false;
-            await alert.save();
-
-            return true;
-        } catch (error) {
-            console.error('Error deactivating alert:', error);
-            throw error;
-        }
-    }
-
-    // Eliminar alerta
     async deleteAlert(userId, alertId) {
-        try {
-            const deleted = await PriceAlert.destroy({
-                where: {
-                    id: alertId,
-                    user_id: userId,
-                },
-            });
-
-            return deleted > 0;
-        } catch (error) {
-            console.error('Error deleting alert:', error);
-            throw error;
-        }
+        const deleted = await PriceAlert.destroy({
+            where: { id: alertId, user_id: userId }
+        });
+        return deleted > 0;
     }
 }
 

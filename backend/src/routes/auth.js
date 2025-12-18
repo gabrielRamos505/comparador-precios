@@ -1,66 +1,21 @@
 const express = require('express');
 const router = express.Router();
 
-// Mock users database
-const users = [
-    {
-        id: '1',
-        name: 'Test User',
-        email: 'test@test.com',
-        password: '123456', // En producción NUNCA guardes contraseñas en texto plano
-    },
-];
+// ✅ Verifica que la ruta relativa sea correcta (../controllers...)
+const authController = require('../controllers/authController');
 
-// POST /api/auth/login
-router.post('/login', (req, res) => {
-    const { email, password } = req.body;
+// ✅ Verifica que uses llaves { } porque el middleware exporta un objeto
+const { authMiddleware } = require('../middleware/authMiddleware');
 
-    const user = users.find(u => u.email === email && u.password === password);
+// Debugging (Opcional: Si sigue fallando, descomenta esto para ver qué es undefined)
+// console.log('Middleware:', authMiddleware);
+// console.log('Controller Verify:', authController.verifyToken);
 
-    if (user) {
-        res.json({
-            success: true,
-            token: 'mock-token-' + Date.now(),
-            userId: user.id,
-            email: user.email,
-            name: user.name,
-        });
-    } else {
-        res.status(401).json({
-            success: false,
-            message: 'Credenciales incorrectas',
-        });
-    }
-});
-
-// POST /api/auth/register
-router.post('/register', (req, res) => {
-    const { name, email, password } = req.body;
-
-    // Verificar si ya existe
-    if (users.find(u => u.email === email)) {
-        return res.status(400).json({
-            success: false,
-            message: 'El email ya está registrado',
-        });
-    }
-
-    const newUser = {
-        id: (users.length + 1).toString(),
-        name,
-        email,
-        password,
-    };
-
-    users.push(newUser);
-
-    res.status(201).json({
-        success: true,
-        token: 'mock-token-' + Date.now(),
-        userId: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
-    });
-});
+router.post('/register', authController.register);
+router.post('/login', authController.login);
+router.get('/verify', authMiddleware, authController.verifyToken); // 👈 Aquí estaba el error
+router.get('/profile', authMiddleware, authController.getProfile);
+router.put('/profile', authMiddleware, authController.updateProfile);
+router.post('/logout', authMiddleware, authController.logout);
 
 module.exports = router;

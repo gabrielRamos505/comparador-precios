@@ -1,7 +1,5 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
-const User = require('./User');
-const Product = require('./Product');
 
 const SearchHistory = sequelize.define('SearchHistory', {
     id: {
@@ -13,7 +11,7 @@ const SearchHistory = sequelize.define('SearchHistory', {
         type: DataTypes.UUID,
         allowNull: false,
         references: {
-            model: User,
+            model: 'users',
             key: 'id',
         },
     },
@@ -21,7 +19,7 @@ const SearchHistory = sequelize.define('SearchHistory', {
         type: DataTypes.UUID,
         allowNull: false,
         references: {
-            model: Product,
+            model: 'products',
             key: 'id',
         },
     },
@@ -37,9 +35,5 @@ const SearchHistory = sequelize.define('SearchHistory', {
     tableName: 'search_history',
     timestamps: false,
 });
-
-// Relaciones
-SearchHistory.belongsTo(User, { foreignKey: 'user_id' });
-SearchHistory.belongsTo(Product, { foreignKey: 'product_id' });
 
 module.exports = SearchHistory;

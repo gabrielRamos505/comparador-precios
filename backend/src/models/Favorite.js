@@ -1,7 +1,5 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
-const User = require('./User');
-const Product = require('./Product');
 
 const Favorite = sequelize.define('Favorite', {
     id: {
@@ -13,7 +11,7 @@ const Favorite = sequelize.define('Favorite', {
         type: DataTypes.UUID,
         allowNull: false,
         references: {
-            model: User,
+            model: 'users', // Nombre de la tabla
             key: 'id',
         },
     },
@@ -21,7 +19,7 @@ const Favorite = sequelize.define('Favorite', {
         type: DataTypes.UUID,
         allowNull: false,
         references: {
-            model: Product,
+            model: 'products', // Nombre de la tabla
             key: 'id',
         },
     },
@@ -39,9 +37,5 @@ const Favorite = sequelize.define('Favorite', {
         },
     ],
 });
-
-// Relaciones
-Favorite.belongsTo(User, { foreignKey: 'user_id' });
-Favorite.belongsTo(Product, { foreignKey: 'product_id' });
 
 module.exports = Favorite;

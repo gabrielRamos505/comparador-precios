@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const historyController = require('../controllers/historyController');
+const { authMiddleware } = require('../middleware/authMiddleware');
+
+// ✅ Aplicar middleware a todas las rutas de historial
+router.use(authMiddleware);
 
 // GET /api/history - Obtener historial del usuario
 router.get('/', historyController.getUserHistory);

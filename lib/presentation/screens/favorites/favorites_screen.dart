@@ -26,7 +26,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   void _loadFavorites() {
     final authState = context.read<AuthBloc>().state;
     if (authState is Authenticated) {
-      context.read<FavoriteBloc>().add(LoadFavorites(authState.user.id));
+      context.read<FavoriteBloc>().add(LoadFavorites()); // ✅ Sin userId
     }
   }
 
@@ -220,12 +220,9 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     );
 
     if (confirm == true && mounted) {
-      final authState = context.read<AuthBloc>().state;
-      if (authState is Authenticated) {
-        context.read<FavoriteBloc>().add(
-              RemoveFavorite(authState.user.id, favorite.productId),
-            );
-      }
+      context.read<FavoriteBloc>().add(
+        RemoveFavorite(favorite.barcode), // ✅ Solo barcode
+      );
     }
   }
 }

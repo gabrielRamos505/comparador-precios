@@ -1,17 +1,23 @@
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants.dart';
 
 class BackendProvider {
   final Dio _dio;
 
-  BackendProvider() : _dio = _createDio();
+  BackendProvider(SharedPreferences prefs) : _dio = _createDio(prefs);
 
-  static Dio _createDio() {
+  static Dio _createDio(SharedPreferences prefs) {
     final dio = Dio(
       BaseOptions(
         baseUrl: AppConstants.backendUrl,
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 10),
+        
+        // ⚠️ CORRECCIÓN CRÍTICA: Aumentar Timeouts
+        // El scraping demora entre 30s y 60s. Si dejas 10s, fallará siempre.
+        connectTimeout: const Duration(seconds: 60),
+        receiveTimeout: const Duration(seconds: 90), 
+        sendTimeout: const Duration(seconds: 60),
+        
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
@@ -19,10 +25,33 @@ class BackendProvider {
       ),
     );
 
+    // ✅ Interceptor para Token JWT
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final token = prefs.getString(AppConstants.tokenKey); // Usar constante
+          if (token != null && token.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+          return handler.next(options);
+        },
+        onError: (error, handler) async {
+          // Si el token expira, limpiar sesión
+          if (error.response?.statusCode == 401) {
+            print('❌ Token inválido/expirado - Cerrando sesión local');
+            await prefs.remove(AppConstants.tokenKey);
+            await prefs.remove(AppConstants.userKey);
+          }
+          return handler.next(error);
+        },
+      ),
+    );
+
+    // ✅ Logger para depuración
     dio.interceptors.add(
       LogInterceptor(
-        requestBody: true,
-        responseBody: true,
+        requestBody: true, // Ver qué enviamos
+        responseBody: true, // Ver qué responde el backend (IMPORTANTE)
         logPrint: (obj) => print('🔵 BACKEND: $obj'),
       ),
     );
@@ -30,54 +59,117 @@ class BackendProvider {
     return dio;
   }
 
-  // Favorites
-  Future<Response> getFavorites(String userId) async {
-    return await _dio.get('/favorites/$userId');
+  // ==========================================
+  // ❤️ FAVORITES
+  // ==========================================
+  
+  Future<Response> getFavorites() async {
+    return await _dio.get('/favorites');
   }
 
   Future<Response> addFavorite(Map<String, dynamic> data) async {
     return await _dio.post('/favorites', data: data);
   }
 
-  Future<Response> removeFavorite(String userId, String productId) async {
-    return await _dio.delete('/favorites/$userId/$productId');
+  Future<Response> removeFavorite(String barcode) async {
+    return await _dio.delete('/favorites/$barcode');
   }
 
-  Future<Response> isFavorite(String userId, String productId) async {
-    return await _dio.get('/favorites/$userId/$productId/check');
+  Future<Response> isFavorite(String barcode) async {
+    return await _dio.get('/favorites/$barcode/check');
   }
 
-  // Price Alerts
-  Future<Response> getAlerts(String userId) async {
-    return await _dio.get('/price-alerts/$userId');
+  // ==========================================
+  // 🔔 PRICE ALERTS
+  // ==========================================
+  
+  Future<Response> getAlerts({
+    bool activeOnly = false,
+    int page = 1,
+    int limit = 20
+  }) async {
+    return await _dio.get('/price-alerts', queryParameters: {
+      'activeOnly': activeOnly,
+      'page': page,
+      'limit': limit,
+    });
   }
 
   Future<Response> createAlert(Map<String, dynamic> data) async {
     return await _dio.post('/price-alerts', data: data);
   }
 
-  Future<Response> updateAlert(String alertId, Map<String, dynamic> data) async {
-    return await _dio.put('/price-alerts/$alertId', data: data);
+  // El backend usa una ruta específica para desactivar
+  Future<Response> deactivateAlert(String alertId) async {
+    return await _dio.put('/price-alerts/$alertId/deactivate');
   }
 
   Future<Response> deleteAlert(String alertId) async {
     return await _dio.delete('/price-alerts/$alertId');
   }
 
-  // Reviews
-  Future<Response> getReviews(String productId) async {
-    return await _dio.get('/reviews/$productId');
+  // ==========================================
+  // ⭐ REVIEWS
+  // ==========================================
+  
+  // ⚠️ CORRECCIÓN: El backend ahora busca por '/product/:barcode'
+  // Antes tenías '/reviews/:productId'
+  Future<Response> getProductReviews(String barcode) async {
+    return await _dio.get('/reviews/product/$barcode');
   }
 
-  Future<Response> createReview(Map<String, dynamic> data) async {
+  Future<Response> getUserReviews() async {
+    return await _dio.get('/reviews/user');
+  }
+
+  Future<Response> createOrUpdateReview(Map<String, dynamic> data) async {
     return await _dio.post('/reviews', data: data);
-  }
-
-  Future<Response> likeReview(String reviewId) async {
-    return await _dio.post('/reviews/$reviewId/like');
   }
 
   Future<Response> deleteReview(String reviewId) async {
     return await _dio.delete('/reviews/$reviewId');
+  }
+
+  // ==========================================
+  // 📨 NOTIFICATIONS
+  // ==========================================
+  
+  Future<Response> getNotifications({
+    bool unreadOnly = false, 
+    int page = 1, 
+    int limit = 20
+  }) async {
+    return await _dio.get('/notifications', queryParameters: {
+      'unread': unreadOnly,
+      'page': page,
+      'limit': limit,
+    });
+  }
+
+  Future<Response> markNotificationAsRead(String notificationId) async {
+    return await _dio.put('/notifications/$notificationId/read');
+  }
+
+  Future<Response> markAllNotificationsAsRead() async {
+    return await _dio.put('/notifications/read-all');
+  }
+
+  // ==========================================
+  // 📜 HISTORY
+  // ==========================================
+
+  Future<Response> getUserHistory({int page = 1, int limit = 20}) async {
+    return await _dio.get('/history', queryParameters: {
+      'page': page,
+      'limit': limit,
+    });
+  }
+
+  Future<Response> deleteHistoryItem(String historyId) async {
+    return await _dio.delete('/history/$historyId');
+  }
+
+  Future<Response> clearHistory() async {
+    return await _dio.delete('/history');
   }
 }

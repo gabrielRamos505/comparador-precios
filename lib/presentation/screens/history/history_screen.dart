@@ -2,57 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../../data/local/search_history_local.dart';
-import '../../../data/models/search_history.dart';
+import '../../blocs/history/history_bloc.dart';
+import '../../blocs/history/history_event.dart';
+import '../../blocs/history/history_state.dart';
 import '../../blocs/product/product_bloc.dart';
 import '../../blocs/product/product_event.dart';
 
-class HistoryScreen extends StatefulWidget {
+class HistoryScreen extends StatelessWidget {
   const HistoryScreen({super.key});
 
-  @override
-  State<HistoryScreen> createState() => _HistoryScreenState();
-}
-
-class _HistoryScreenState extends State<HistoryScreen> {
-  SearchHistoryLocal? _historyLocal;
-  List<SearchHistory> _history = [];
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _initHistory();
+  void _searchAgain(BuildContext context, String barcode) {
+    context.read<ProductBloc>().add(SearchProductByBarcode(barcode));
+    context.push('/results');
   }
 
-  Future<void> _initHistory() async {
-    final prefs = await SharedPreferences.getInstance();
-    _historyLocal = SearchHistoryLocal(prefs);
-    await _loadHistory();
+  void _deleteItem(BuildContext context, String historyId) {
+    context.read<HistoryBloc>().add(DeleteHistoryItem(historyId));
   }
 
-  Future<void> _loadHistory() async {
-    if (_historyLocal == null) return;
-    
-    setState(() => _isLoading = true);
-    final history = await _historyLocal!.getAll();
-    setState(() {
-      _history = history;
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _deleteItem(SearchHistory item) async {
-    if (_historyLocal == null) return;
-    
-    await _historyLocal!.delete(item.barcode, item.searchedAt);
-    _loadHistory();
-  }
-
-  Future<void> _clearAll() async {
-    if (_historyLocal == null) return;
-    
+  Future<void> _clearAll(BuildContext context) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -72,15 +40,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ),
     );
 
-    if (confirm == true) {
-      await _historyLocal!.deleteAll();
-      _loadHistory();
+    if (confirm == true && context.mounted) {
+      context.read<HistoryBloc>().add(ClearHistory());
     }
-  }
-
-  void _searchAgain(String barcode) {
-    context.read<ProductBloc>().add(SearchProductByBarcode(barcode));
-    context.push('/results');
   }
 
   @override
@@ -89,19 +51,45 @@ class _HistoryScreenState extends State<HistoryScreen> {
       appBar: AppBar(
         title: const Text('Historial'),
         actions: [
-          if (_history.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.delete_sweep),
-              onPressed: _clearAll,
-              tooltip: 'Borrar todo',
-            ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () => context.read<HistoryBloc>().add(const LoadHistory(isRefresh: true)),
+            tooltip: 'Actualizar',
+          ),
+          BlocBuilder<HistoryBloc, HistoryState>(
+            builder: (context, state) {
+              if (state is HistoryLoaded && state.history.isNotEmpty) {
+                return IconButton(
+                  icon: const Icon(Icons.delete_sweep),
+                  onPressed: () => _clearAll(context),
+                  tooltip: 'Borrar todo',
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _history.isEmpty
-              ? _buildEmptyState()
-              : _buildHistoryList(),
+      body: BlocBuilder<HistoryBloc, HistoryState>(
+        builder: (context, state) {
+          if (state is HistoryLoading) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (state is HistoryError) {
+            return Center(child: Text(state.message));
+          }
+
+          if (state is HistoryLoaded) {
+            if (state.history.isEmpty) {
+              return _buildEmptyState();
+            }
+            return _buildHistoryList(state);
+          }
+
+          return const SizedBox.shrink();
+        },
+      ),
     );
   }
 
@@ -134,96 +122,90 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  Widget _buildHistoryList() {
-    return ListView.builder(
-      itemCount: _history.length,
-      padding: const EdgeInsets.all(8),
-      itemBuilder: (context, index) {
-        final item = _history[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-          child: ListTile(
-            leading: item.imageUrl != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      item.imageUrl!,
-                      width: 50,
-                      height: 50,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          width: 50,
-                          height: 50,
-                          color: Colors.grey.shade200,
-                          child: const Icon(Icons.image_not_supported),
-                        );
-                      },
-                    ),
-                  )
-                : Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
+  Widget _buildHistoryList(HistoryLoaded state) {
+    return RefreshIndicator(
+      onRefresh: () async {
+        // En Bloc we trigger an event
+      },
+      child: ListView.builder(
+        itemCount: state.history.length,
+        padding: const EdgeInsets.all(8),
+        itemBuilder: (context, index) {
+          final item = state.history[index];
+          
+          return Card(
+            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+            child: ListTile(
+              leading: item.imageUrl != null
+                  ? ClipRRect(
                       borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        item.imageUrl!,
+                        width: 50,
+                        height: 50,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
+                      ),
+                    )
+                  : _buildPlaceholder(),
+              title: Text(
+                item.productName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (item.barcode.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Código: ${item.barcode}',
+                      style: const TextStyle(fontSize: 12),
                     ),
-                    child: const Icon(Icons.shopping_bag),
-                  ),
-            title: Text(
-              item.productName,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 4),
-                Text(
-                  'Código: ${item.barcode}',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                if (item.lowestPrice != null) ...[
+                  ],
                   const SizedBox(height: 2),
                   Text(
-                    'Desde \$${item.lowestPrice!.toStringAsFixed(2)} en ${item.platform}',
+                    _formatDate(item.searchedAt),
                     style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.green.shade700,
-                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                      color: Colors.grey.shade600,
                     ),
                   ),
                 ],
-                const SizedBox(height: 2),
-                Text(
-                  _formatDate(item.searchedAt),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade600,
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (item.barcode.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.refresh, color: Colors.blue),
+                      onPressed: () => _searchAgain(context, item.barcode),
+                      tooltip: 'Buscar de nuevo',
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    onPressed: () => _deleteItem(context, item.id),
+                    tooltip: 'Eliminar',
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.refresh, color: Colors.blue),
-                  onPressed: () => _searchAgain(item.barcode),
-                  tooltip: 'Buscar de nuevo',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red),
-                  onPressed: () => _deleteItem(item),
-                  tooltip: 'Eliminar',
-                ),
-              ],
-            ),
-            isThreeLine: true,
-          ),
-        );
-      },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      width: 50,
+      height: 50,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const Icon(Icons.shopping_bag),
     );
   }
 

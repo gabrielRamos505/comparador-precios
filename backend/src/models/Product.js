@@ -16,6 +16,7 @@ const Product = sequelize.define('Product', {
         type: DataTypes.STRING,
         allowNull: false,
     },
+    // ... resto de campos igual ...
     brand: {
         type: DataTypes.STRING,
     },
@@ -33,6 +34,16 @@ const Product = sequelize.define('Product', {
     timestamps: true,
     createdAt: 'created_at',
     updatedAt: 'updated_at',
+    // ✅ MEJORA: Índices para búsqueda rápida
+    indexes: [
+        {
+            unique: true,
+            fields: ['barcode'] // Ya lo tienes implícito por unique: true, pero no hace daño
+        },
+        {
+            fields: ['name'] // 🚀 Acelera búsquedas por nombre si las haces en el futuro
+        }
+    ]
 });
 
 module.exports = Product;

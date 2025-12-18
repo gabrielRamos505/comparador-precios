@@ -1,70 +1,122 @@
+import 'package:dio/dio.dart';
 import '../models/price_alert.dart';
+import '../models/product.dart'; // Necesario para sacar datos del producto al crear
 import '../providers/backend_provider.dart';
 
+/// Clase auxiliar para paginación
+class PriceAlertResult {
+  final List<PriceAlert> alerts;
+  final int totalCount;
+  final int totalPages;
+
+  PriceAlertResult({
+    required this.alerts,
+    required this.totalCount,
+    required this.totalPages,
+  });
+}
+
 class PriceAlertRepository {
-  final BackendProvider _backendProvider;
+  final BackendProvider _provider;
 
-  PriceAlertRepository(this._backendProvider);
+  PriceAlertRepository(this._provider);
 
-  Future<List<PriceAlert>> getAlerts(String userId) async {
+  // ✅ Obtener alertas con Paginación
+  Future<PriceAlertResult> getAlerts({
+    bool activeOnly = false,
+    int page = 1,
+    int limit = 20,
+  }) async {
     try {
-      final response = await _backendProvider.getAlerts(userId);
+      // Nota: Asegúrate de que BackendProvider.getAlerts acepte queryParameters
+      // Si no, modifícalo como hicimos con Notifications.
+      // Por ahora, asumimos que el backend filtra por defecto o pasamos params manuales si el provider lo permite.
+      final response = await _provider.getAlerts(
+        activeOnly: activeOnly,
+        page: page,
+        limit: limit,
+      );
       
-      if (response.data['success']) {
+      if (response.data['success'] == true) {
         final List<dynamic> data = response.data['data'];
-        return data.map((json) => PriceAlert.fromJson(json)).toList();
+        final meta = response.data['meta'];
+
+        return PriceAlertResult(
+          alerts: data.map((json) => PriceAlert.fromJson(json)).toList(),
+          totalCount: meta != null ? (meta['total'] ?? 0) : 0,
+          totalPages: meta != null ? (meta['totalPages'] ?? 1) : 1,
+        );
       }
-      
-      return [];
+      return PriceAlertResult(alerts: [], totalCount: 0, totalPages: 0);
+
     } catch (e) {
-      throw Exception('Error al obtener alertas: $e');
+      throw _handleError(e);
     }
   }
 
+  // ✅ Crear Alerta con la estructura EXACTA que espera el Backend
   Future<PriceAlert> createAlert({
-    required String userId,
-    required String productId,
-    required String productName,
+    required Product product,
+    required String platform, // Ej: "Plaza Vea", "Metro"
     required double targetPrice,
     required double currentPrice,
   }) async {
     try {
-      final response = await _backendProvider.createAlert({
-        'userId': userId,
-        'productId': productId,
-        'productName': productName,
+      final response = await _provider.createAlert({
+        'barcode': product.barcode,
+        'platform': platform,
         'targetPrice': targetPrice,
         'currentPrice': currentPrice,
+        'productData': {
+          'name': product.name,
+          'imageUrl': product.imageUrl,
+          'brand': product.brand,
+          'category': product.category
+        }
       });
       
-      if (response.data['success']) {
+      if (response.data['success'] == true) {
         return PriceAlert.fromJson(response.data['data']);
+      } else {
+        throw Exception(response.data['error'] ?? 'Error al crear alerta');
       }
-      
-      throw Exception(response.data['message']);
     } catch (e) {
-      throw Exception('Error al crear alerta: $e');
+      throw _handleError(e);
     }
   }
 
-  Future<bool> updateAlert(String alertId, double targetPrice) async {
+  // Desactivar alerta (Lógica de negocio: no se suele "editar" el precio, se desactiva o borra)
+  Future<void> deactivateAlert(String alertId) async {
     try {
-      final response = await _backendProvider.updateAlert(
-        alertId,
-        {'targetPrice': targetPrice},
-      );
-      return response.data['success'] ?? false;
+      final response = await _provider.deactivateAlert(alertId);
+      if (response.data['success'] != true) {
+        throw Exception(response.data['error'] ?? 'No se pudo desactivar la alerta');
+      }
     } catch (e) {
-      throw Exception('Error al actualizar alerta: $e');
+      throw _handleError(e);
     }
   }
 
-  Future<bool> deleteAlert(String alertId) async {
+  Future<void> deleteAlert(String alertId) async {
     try {
-      final response = await _backendProvider.deleteAlert(alertId);
-      return response.data['success'] ?? false;
+      final response = await _provider.deleteAlert(alertId);
+      if (response.data['success'] != true) {
+        throw Exception(response.data['error'] ?? 'No se pudo eliminar la alerta');
+      }
     } catch (e) {
-      throw Exception('Error al eliminar alerta: $e');
+      throw _handleError(e);
     }
+  }
+
+  // Helper de errores limpio
+  Exception _handleError(dynamic e) {
+    if (e is DioException) {
+      // Si el backend responde 409 (Conflict), es porque ya existe la alerta
+      if (e.response?.statusCode == 409) {
+        return Exception('Ya tienes una alerta activa para este producto en esta tienda.');
+      }
+      return Exception(e.message);
+    }
+    return Exception(e.toString().replaceAll('Exception: ', ''));
   }
 }

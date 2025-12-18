@@ -5,59 +5,38 @@ abstract class FavoriteEvent extends Equatable {
   List<Object?> get props => [];
 }
 
-class LoadFavorites extends FavoriteEvent {
-  final String userId;
-
-  LoadFavorites(this.userId);
-
-  @override
-  List<Object?> get props => [userId];
-}
+// ✅ Ya NO necesita userId
+class LoadFavorites extends FavoriteEvent {}
 
 class AddFavorite extends FavoriteEvent {
-  final String userId;
-  final String productId;
-  final String productName;
   final String barcode;
-  final String? imageUrl;
-  final double? lowestPrice;
+  final String name;
+  final String imageUrl;
 
   AddFavorite({
-    required this.userId,
-    required this.productId,
-    required this.productName,
     required this.barcode,
-    this.imageUrl,
-    this.lowestPrice,
+    required this.name,
+    required this.imageUrl,
   });
 
   @override
-  List<Object?> get props => [
-        userId,
-        productId,
-        productName,
-        barcode,
-        imageUrl,
-        lowestPrice,
-      ];
+  List<Object?> get props => [barcode, name, imageUrl];
 }
 
 class RemoveFavorite extends FavoriteEvent {
-  final String userId;
-  final String productId;
+  final String barcode;
 
-  RemoveFavorite(this.userId, this.productId);
+  RemoveFavorite(this.barcode);
 
   @override
-  List<Object?> get props => [userId, productId];
+  List<Object?> get props => [barcode];
 }
 
 class CheckFavorite extends FavoriteEvent {
-  final String userId;
-  final String productId;
+  final String barcode;
 
-  CheckFavorite(this.userId, this.productId);
+  CheckFavorite(this.barcode);
 
   @override
-  List<Object?> get props => [userId, productId];
+  List<Object?> get props => [barcode];
 }

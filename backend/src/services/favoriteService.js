@@ -1,77 +1,109 @@
-const { Favorite, Product } = require('../models');
+const Favorite = require('../models/Favorite');
+const Product = require('../models/Product');
 
 class FavoriteService {
-    // Agregar a favoritos
-    async addFavorite(userId, productData, barcode) {
+
+    // ✅ Optimizado con Paginación
+    async getUserFavorites(userId, page = 1, limit = 20) {
         try {
-            // 1. Buscar o crear el producto
-            let product = await Product.findOne({ where: { barcode } });
+            const offset = (page - 1) * limit;
 
-            if (!product) {
-                product = await Product.create({
-                    barcode: productData.barcode || barcode,
-                    name: productData.name,
-                    brand: productData.brand,
-                    category: productData.category,
-                    image_url: productData.imageUrl,
-                    description: productData.description,
-                });
-            }
-
-            // 2. Verificar si ya existe en favoritos
-            const existing = await Favorite.findOne({
-                where: {
-                    user_id: userId,
-                    product_id: product.id,
-                },
-            });
-
-            if (existing) {
-                return { favorite: existing, isNew: false };
-            }
-
-            // 3. Crear favorito
-            const favorite = await Favorite.create({
-                user_id: userId,
-                product_id: product.id,
-            });
-
-            return { favorite, isNew: true };
-        } catch (error) {
-            console.error('Error adding favorite:', error);
-            throw error;
-        }
-    }
-
-    // Obtener favoritos del usuario
-    async getUserFavorites(userId) {
-        try {
-            const favorites = await Favorite.findAll({
+            const { count, rows } = await Favorite.findAndCountAll({
                 where: { user_id: userId },
-                include: [
-                    {
-                        model: Product,
-                        attributes: ['id', 'barcode', 'name', 'brand', 'image_url', 'category'],
-                    },
-                ],
-                order: [['added_at', 'DESC']],
+                include: [{
+                    model: Product,
+                    as: 'Product',
+                    attributes: ['id', 'barcode', 'name', 'image_url', 'category']
+                }],
+                limit: limit,
+                offset: offset,
+                // ⚠️ CAMBIO CLAVE AQUÍ: Usar 'added_at' en lugar de 'createdAt'
+                order: [['added_at', 'DESC']]
             });
 
-            return favorites;
+            const mappedFavorites = rows.map(fav => ({
+                id: fav.id,
+                barcode: fav.Product?.barcode,
+                productName: fav.Product?.name || 'Producto desconocido',
+                imageUrl: fav.Product?.image_url,
+                category: fav.Product?.category,
+                productId: fav.product_id,
+                addedAt: fav.added_at // ✅ Coincide con tu modelo
+            }));
+
+            return {
+                total: count,
+                favorites: mappedFavorites
+            };
+
         } catch (error) {
             console.error('Error getting favorites:', error);
             throw error;
         }
     }
 
-    // Eliminar de favoritos
-    async removeFavorite(userId, productId) {
+    async addFavorite({ userId, barcode, name, imageUrl, brand, price }) {
         try {
+            // 1. Gestión del Producto (Atomicidad)
+            // Usamos findOrCreate para evitar que se cree doble si dos usuarios lo agregan a la vez
+            const [product, createdProduct] = await Product.findOrCreate({
+                where: { barcode },
+                defaults: {
+                    name,
+                    image_url: imageUrl || null,
+                    category: 'General',
+                    brand: brand || null
+                }
+            });
+
+            // Si el producto ya existía pero no tenía imagen y ahora sí traemos una, actualizamos
+            if (!createdProduct && imageUrl && !product.image_url) {
+                product.image_url = imageUrl;
+                await product.save();
+            }
+
+            // 2. Gestión del Favorito
+            // Usamos findOrCreate para evitar error de Unique Constraint si el usuario hace doble clic
+            const [favorite, createdFavorite] = await Favorite.findOrCreate({
+                where: {
+                    user_id: userId,
+                    product_id: product.id
+                }
+            });
+
+            // Si no se creó, significa que ya existía
+            if (!createdFavorite) {
+                const error = new Error('El producto ya está en favoritos');
+                error.code = 'DUPLICATE_ENTRY'; // Código para que el Controller sepa qué responder
+                throw error;
+            }
+
+            return {
+                id: favorite.id,
+                barcode: product.barcode,
+                productName: product.name,
+                imageUrl: product.image_url,
+                addedAt: favorite.created_at
+            };
+
+        } catch (error) {
+            console.error('Error adding favorite:', error);
+            throw error;
+        }
+    }
+
+    async removeFavorite(userId, barcode) {
+        try {
+            // Buscamos producto primero
+            const product = await Product.findOne({ where: { barcode } });
+
+            if (!product) return false;
+
             const deleted = await Favorite.destroy({
                 where: {
                     user_id: userId,
-                    product_id: productId,
-                },
+                    product_id: product.id
+                }
             });
 
             return deleted > 0;
@@ -81,20 +113,22 @@ class FavoriteService {
         }
     }
 
-    // Verificar si un producto es favorito
-    async isFavorite(userId, productId) {
+    async isFavorite(userId, barcode) {
         try {
-            const favorite = await Favorite.findOne({
+            const product = await Product.findOne({ where: { barcode } });
+            if (!product) return false;
+
+            const count = await Favorite.count({
                 where: {
                     user_id: userId,
-                    product_id: productId,
-                },
+                    product_id: product.id
+                }
             });
 
-            return favorite !== null;
+            return count > 0;
         } catch (error) {
             console.error('Error checking favorite:', error);
-            return false;
+            throw error;
         }
     }
 }

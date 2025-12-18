@@ -7,6 +7,9 @@ abstract class AuthEvent extends Equatable {
 
 class AppStarted extends AuthEvent {}
 
+// ✅ NUEVO: Para verificar token al iniciar
+class CheckAuthStatus extends AuthEvent {}
+
 class LoginRequested extends AuthEvent {
   final String email;
   final String password;

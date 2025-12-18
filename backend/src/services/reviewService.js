@@ -1,136 +1,120 @@
-const { Review, Product, User } = require('../models');
-const { Op } = require('sequelize');
+const Review = require('../models/Review');
+const Product = require('../models/Product');
+const User = require('../models/User');
+const { sequelize } = require('../models/Review'); // Para funciones de agregación
 
 class ReviewService {
-    // Crear o actualizar review
-    async createOrUpdateReview(userId, productData, barcode, rating, comment) {
+
+    async getProductReviews(barcode, page = 1, limit = 10) {
         try {
-            // 1. Buscar o crear el producto
-            let product = await Product.findOne({ where: { barcode } });
+            // 1. Buscar el producto por barcode
+            const product = await Product.findOne({ where: { barcode } });
 
             if (!product) {
-                product = await Product.create({
-                    barcode: productData.barcode || barcode,
-                    name: productData.name,
-                    brand: productData.brand,
-                    category: productData.category,
-                    image_url: productData.imageUrl,
-                    description: productData.description,
-                });
+                throw new Error('Product not found');
             }
 
-            // 2. Buscar review existente
-            let review = await Review.findOne({
-                where: {
-                    user_id: userId,
-                    product_id: product.id,
-                },
+            const offset = (page - 1) * limit;
+
+            // 2. Obtener reviews paginadas
+            const { count, rows } = await Review.findAndCountAll({
+                where: { product_id: product.id },
+                include: [{
+                    model: User,
+                    as: 'User',
+                    attributes: ['id', 'name'] // Solo mostramos el nombre del usuario
+                }],
+                limit,
+                offset,
+                order: [['created_at', 'DESC']]
             });
 
-            if (review) {
-                // Actualizar
-                review.rating = rating;
-                review.comment = comment;
-                await review.save();
-                return { review, isNew: false };
-            } else {
-                // Crear
-                review = await Review.create({
-                    user_id: userId,
-                    product_id: product.id,
-                    rating: rating,
-                    comment: comment,
-                });
-                return { review, isNew: true };
-            }
-        } catch (error) {
-            console.error('Error creating/updating review:', error);
-            throw error;
-        }
-    }
-
-    // Obtener reviews de un producto
-    async getProductReviews(productId) {
-        try {
-            const reviews = await Review.findAll({
-                where: { product_id: productId },
-                include: [
-                    {
-                        model: User,
-                        attributes: ['id', 'name'],
-                    },
+            // 3. Calcular promedio de estrellas (Rating)
+            const aggregation = await Review.findAll({
+                where: { product_id: product.id },
+                attributes: [
+                    [sequelize.fn('AVG', sequelize.col('rating')), 'avgRating']
                 ],
-                order: [['created_at', 'DESC']],
+                raw: true
             });
 
-            return reviews;
-        } catch (error) {
-            console.error('Error getting product reviews:', error);
-            throw error;
-        }
-    }
-
-    // Obtener reviews del usuario
-    async getUserReviews(userId) {
-        try {
-            const reviews = await Review.findAll({
-                where: { user_id: userId },
-                include: [
-                    {
-                        model: Product,
-                        attributes: ['id', 'barcode', 'name', 'brand', 'image_url'],
-                    },
-                ],
-                order: [['created_at', 'DESC']],
-            });
-
-            return reviews;
-        } catch (error) {
-            console.error('Error getting user reviews:', error);
-            throw error;
-        }
-    }
-
-    // Obtener promedio de calificación de un producto
-    async getProductAverageRating(productId) {
-        try {
-            const reviews = await Review.findAll({
-                where: { product_id: productId },
-                attributes: ['rating'],
-            });
-
-            if (reviews.length === 0) {
-                return { average: 0, count: 0 };
-            }
-
-            const sum = reviews.reduce((acc, review) => acc + review.rating, 0);
-            const average = sum / reviews.length;
+            const averageRating = aggregation[0]?.avgRating || 0;
 
             return {
-                average: Math.round(average * 10) / 10, // 1 decimal
-                count: reviews.length,
+                total: count,
+                reviews: rows,
+                averageRating: parseFloat(averageRating)
             };
+
         } catch (error) {
-            console.error('Error getting average rating:', error);
             throw error;
         }
     }
 
-    // Eliminar review
-    async deleteReview(userId, reviewId) {
-        try {
-            const deleted = await Review.destroy({
-                where: {
-                    id: reviewId,
-                    user_id: userId,
-                },
-            });
+    async getUserReviews(userId, page = 1, limit = 10) {
+        const offset = (page - 1) * limit;
 
-            return deleted > 0;
-        } catch (error) {
-            console.error('Error deleting review:', error);
-            throw error;
+        const { count, rows } = await Review.findAndCountAll({
+            where: { user_id: userId },
+            include: [{
+                model: Product,
+                as: 'Product',
+                attributes: ['id', 'name', 'barcode', 'image_url']
+            }],
+            limit,
+            offset,
+            order: [['created_at', 'DESC']]
+        });
+
+        return { total: count, reviews: rows };
+    }
+
+    async createOrUpdateReview({ userId, productData, barcode, rating, comment }) {
+        // 1. Asegurar que el producto existe
+        const [product] = await Product.findOrCreate({
+            where: { barcode },
+            defaults: {
+                name: productData?.name || 'Producto desconocido',
+                image_url: productData?.imageUrl,
+                brand: productData?.brand,
+                category: 'General'
+            }
+        });
+
+        // 2. Buscar si el usuario ya opinó sobre este producto
+        const existingReview = await Review.findOne({
+            where: {
+                user_id: userId,
+                product_id: product.id
+            }
+        });
+
+        if (existingReview) {
+            // ACTUALIZAR
+            existingReview.rating = rating;
+            existingReview.comment = comment;
+            await existingReview.save();
+            return { isNew: false, review: existingReview };
+        } else {
+            // CREAR
+            const newReview = await Review.create({
+                user_id: userId,
+                product_id: product.id,
+                rating,
+                comment
+            });
+            return { isNew: true, review: newReview };
         }
+    }
+
+    async deleteReview(userId, reviewId) {
+        const deleted = await Review.destroy({
+            where: {
+                id: reviewId,
+                user_id: userId // Seguridad: solo el dueño borra
+            }
+        });
+        return deleted > 0;
     }
 }
 

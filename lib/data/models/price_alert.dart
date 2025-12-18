@@ -24,16 +24,21 @@ class PriceAlert extends Equatable {
   });
 
   factory PriceAlert.fromJson(Map<String, dynamic> json) {
+    // El backend usa 'status' (active, triggered, inactive)
+    final String status = json['status'] ?? (json['isActive'] == true ? 'active' : 'inactive');
+    
     return PriceAlert(
-      id: json['id'] ?? '',
-      userId: json['userId'] ?? '',
-      productId: json['productId'] ?? '',
-      productName: json['productName'] ?? '',
-      targetPrice: (json['targetPrice'] ?? 0).toDouble(),
-      currentPrice: (json['currentPrice'] ?? 0).toDouble(),
-      isActive: json['isActive'] ?? true,
-      createdAt: DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
-      notifiedAt: json['notifiedAt'] != null ? DateTime.parse(json['notifiedAt']) : null,
+      id: json['id']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? json['user_id']?.toString() ?? '',
+      productId: json['productId']?.toString() ?? json['product_id']?.toString() ?? '',
+      productName: json['productName'] ?? json['Product']?['name'] ?? 'Producto',
+      targetPrice: (json['targetPrice'] ?? json['target_price'] ?? 0).toDouble(),
+      currentPrice: (json['currentPrice'] ?? json['initial_price'] ?? 0).toDouble(),
+      isActive: status == 'active',
+      createdAt: DateTime.parse(json['createdAt'] ?? json['created_at'] ?? DateTime.now().toIso8601String()),
+      notifiedAt: json['notifiedAt'] != null || json['notified_at'] != null 
+          ? DateTime.parse(json['notifiedAt'] ?? json['notified_at']) 
+          : null,
     );
   }
 

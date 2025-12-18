@@ -1,7 +1,5 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
-const User = require('./User');
-const Product = require('./Product');
 
 const PriceAlert = sequelize.define('PriceAlert', {
     id: {
@@ -12,47 +10,39 @@ const PriceAlert = sequelize.define('PriceAlert', {
     user_id: {
         type: DataTypes.UUID,
         allowNull: false,
-        references: {
-            model: User,
-            key: 'id',
-        },
+        references: { model: 'users', key: 'id' }
     },
     product_id: {
         type: DataTypes.UUID,
         allowNull: false,
-        references: {
-            model: Product,
-            key: 'id',
-        },
+        references: { model: 'products', key: 'id' }
     },
-    platform: {
-        type: DataTypes.STRING(100),
+    platform: { // Tienda (Plaza Vea, Metro, etc.)
+        type: DataTypes.STRING,
         allowNull: false,
     },
-    target_price: {
+    target_price: { // Precio al que quiero comprar
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
     },
-    current_price: {
+    initial_price: { // Precio cuando creé la alerta (para calcular ahorro)
         type: DataTypes.DECIMAL(10, 2),
     },
-    is_active: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true,
+    status: {
+        type: DataTypes.ENUM('active', 'triggered', 'inactive'),
+        defaultValue: 'active',
     },
-    notified: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
+    created_at: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW,
     },
 }, {
     tableName: 'price_alerts',
-    timestamps: true,
-    createdAt: 'created_at',
-    updatedAt: 'updated_at',
+    timestamps: false,
+    indexes: [
+        { fields: ['user_id'] },
+        { fields: ['status'] } // Útil para que el CRON JOB busque solo las 'active'
+    ]
 });
-
-// Relaciones
-PriceAlert.belongsTo(User, { foreignKey: 'user_id' });
-PriceAlert.belongsTo(Product, { foreignKey: 'product_id' });
 
 module.exports = PriceAlert;

@@ -21,9 +21,13 @@ dependencies:
   mobile_scanner: ^5.0.0
   image_picker: ^1.0.7
   
+  # NUEVAS para IA
+  http: ^1.2.0          # Para enviar imagen
   # Efectos y feedback
   vibration: ^3.1.4
   flutter_animate: ^4.5.0
+
+  url_launcher: ^6.2.5
   
   # Permisos
   permission_handler: ^11.3.0

@@ -1,121 +1,110 @@
-const favoriteService = require('../services/favoriteService');
+const FavoriteService = require('../services/favoriteService');
 
 class FavoriteController {
-    // GET /api/favorites - Obtener todos los favoritos del usuario
+
+    // Obtener favoritos (Con paginación opcional)
     async getUserFavorites(req, res) {
         try {
-            const userId = req.query.userId || '1'; // TODO: Obtener del token JWT
+            const userId = req.user.userId;
+            // Paginación por defecto: página 1, 20 items
+            const { page = 1, limit = 20 } = req.query;
 
-            console.log(`📋 Getting favorites for user ${userId}`);
+            const result = await FavoriteService.getUserFavorites(userId, parseInt(page), parseInt(limit));
 
-            const favorites = await favoriteService.getUserFavorites(userId);
-
-            console.log(`✅ Found ${favorites.length} favorites`);
-
+            // Estructura de respuesta paginada estándar
             res.json({
                 success: true,
-                data: favorites,
+                data: result.favorites,
+                meta: {
+                    total: result.total,
+                    page: parseInt(page),
+                    totalPages: Math.ceil(result.total / limit)
+                }
             });
         } catch (error) {
-            console.error('❌ Error in getUserFavorites:', error);
-            res.status(500).json({
-                success: false,
-                error: error.message,
-            });
+            console.error('Error getting favorites:', error);
+            res.status(500).json({ success: false, error: 'Error al obtener favoritos' });
         }
     }
 
-    // POST /api/favorites - Agregar producto a favoritos
+    // Agregar a favoritos
     async addFavorite(req, res) {
         try {
-            const userId = req.query.userId || '1';
-            const { productData, barcode } = req.body;
+            const userId = req.user.userId;
+            // Extraemos más campos útiles si vienen del frontend (marca, precio actual)
+            const { barcode, name, imageUrl, brand, price } = req.body;
 
-            console.log(`⭐ Adding favorite for user ${userId}, barcode: ${barcode}`);
+            if (!barcode || !name) {
+                return res.status(400).json({ success: false, error: 'Barcode y nombre son requeridos' });
+            }
 
-            // Validar datos requeridos
-            if (!productData || !barcode) {
-                return res.status(400).json({
+            const favorite = await FavoriteService.addFavorite({
+                userId,
+                barcode,
+                name,
+                imageUrl,
+                brand,
+                price
+            });
+
+            res.status(201).json({ // 201 = Created
+                success: true,
+                message: 'Producto añadido a favoritos',
+                data: favorite
+            });
+
+        } catch (error) {
+            // Manejo robusto de errores
+            // Asumimos que el servicio lanza un error con código o mensaje específico
+            if (error.message.includes('ya existe') || error.code === 'DUPLICATE_ENTRY') {
+                return res.status(409).json({ // 409 = Conflict
                     success: false,
-                    error: 'productData and barcode are required',
+                    error: 'El producto ya está en tus favoritos'
                 });
             }
 
-            const result = await favoriteService.addFavorite(userId, productData, barcode);
-
-            console.log(`✅ Favorite ${result.isNew ? 'added' : 'already exists'}`);
-
-            res.status(result.isNew ? 201 : 200).json({
-                success: true,
-                message: result.isNew ? 'Added to favorites' : 'Already in favorites',
-                data: result.favorite,
-                isNew: result.isNew,
-            });
-        } catch (error) {
-            console.error('❌ Error in addFavorite:', error);
-            res.status(500).json({
-                success: false,
-                error: error.message,
-            });
+            console.error('Error adding favorite:', error);
+            res.status(500).json({ success: false, error: 'Error interno al agregar favorito' });
         }
     }
 
-    // DELETE /api/favorites/:productId - Eliminar producto de favoritos
+    // Eliminar de favoritos
     async removeFavorite(req, res) {
         try {
-            const userId = req.query.userId || '1';
-            const { productId } = req.params;
+            const userId = req.user.userId;
+            const { barcode } = req.params;
 
-            console.log(`🗑️  Removing favorite for user ${userId}, product: ${productId}`);
+            if (!barcode) return res.status(400).json({ success: false, error: 'Barcode requerido' });
 
-            const deleted = await favoriteService.removeFavorite(userId, productId);
+            const deleted = await FavoriteService.removeFavorite(userId, barcode);
 
             if (!deleted) {
-                console.log('⚠️  Favorite not found');
-                return res.status(404).json({
-                    success: false,
-                    error: 'Favorite not found',
-                });
+                return res.status(404).json({ success: false, error: 'El producto no estaba en favoritos' });
             }
 
-            console.log('✅ Favorite removed');
+            res.json({ success: true, message: 'Producto eliminado de favoritos' });
 
-            res.json({
-                success: true,
-                message: 'Removed from favorites',
-            });
         } catch (error) {
-            console.error('❌ Error in removeFavorite:', error);
-            res.status(500).json({
-                success: false,
-                error: error.message,
-            });
+            console.error('Error removing favorite:', error);
+            res.status(500).json({ success: false, error: 'Error al eliminar favorito' });
         }
     }
 
-    // GET /api/favorites/check/:productId - Verificar si un producto es favorito
+    // Verificar estado (útil para pintar el corazón lleno o vacío en el frontend)
     async checkFavorite(req, res) {
         try {
-            const userId = req.query.userId || '1';
-            const { productId } = req.params;
+            const userId = req.user.userId;
+            const { barcode } = req.params;
 
-            console.log(`🔍 Checking if product ${productId} is favorite for user ${userId}`);
+            if (!barcode) return res.status(400).json({ error: 'Barcode requerido' });
 
-            const isFavorite = await favoriteService.isFavorite(userId, productId);
+            const isFavorite = await FavoriteService.isFavorite(userId, barcode);
 
-            console.log(`${isFavorite ? '⭐' : '☆'} Product ${isFavorite ? 'IS' : 'IS NOT'} favorite`);
+            res.json({ success: true, isFavorite });
 
-            res.json({
-                success: true,
-                isFavorite: isFavorite,
-            });
         } catch (error) {
-            console.error('❌ Error in checkFavorite:', error);
-            res.status(500).json({
-                success: false,
-                error: error.message,
-                isFavorite: false, // Default a false en caso de error
-            });
+            console.error('Error checking favorite:', error);
+            res.status(500).json({ success: false, error: 'Error al verificar estado' });
         }
     }
 }

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io';
 import '../../blocs/scanner/scanner_bloc.dart';
 import '../../blocs/scanner/scanner_event.dart';
 import '../../blocs/scanner/scanner_state.dart';
@@ -88,10 +89,7 @@ class _ScannerScreenState extends State<ScannerScreen>
         _lastScannedBarcode = code;
         _isProcessing = true;
 
-        // Notificar al BLoC
         context.read<ScannerBloc>().add(BarcodeDetected(code));
-
-        // Buscar producto
         _searchProduct(code);
         break;
       }
@@ -102,6 +100,26 @@ class _ScannerScreenState extends State<ScannerScreen>
     context.read<ProductBloc>().add(SearchProductByBarcode(barcode));
   }
 
+  /// 🆕 NUEVA FUNCIÓN: Búsqueda por foto usando IA
+  Future<void> _searchByPhoto() async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1920,
+        maxHeight: 1080,
+        imageQuality: 85,
+      );
+
+      if (image != null && mounted) {
+        // Navegar a pantalla de IA con la imagen
+        context.push('/ai-search', extra: image.path);
+      }
+    } catch (e) {
+      _showError('Error al capturar foto: $e');
+    }
+  }
+
+  /// FUNCIÓN: Escanear desde galería
   Future<void> _scanFromGallery() async {
     try {
       final XFile? image = await _imagePicker.pickImage(
@@ -109,6 +127,7 @@ class _ScannerScreenState extends State<ScannerScreen>
       );
 
       if (image != null) {
+        // Intentar detectar código de barras primero
         final BarcodeCapture? capture = await _scannerController.analyzeImage(
           image.path,
         );
@@ -118,12 +137,42 @@ class _ScannerScreenState extends State<ScannerScreen>
           if (code != null) {
             _onDetect(capture);
           } else {
-            _showError('No se detectó código de barras en la imagen');
+            // Si no hay código de barras, preguntar si quiere usar IA
+            _askForAISearch(image.path);
           }
+        } else {
+          // No se detectó código, ofrecer búsqueda por IA
+          _askForAISearch(image.path);
         }
       }
     } catch (e) {
       _showError('Error al cargar imagen: $e');
+    }
+  }
+
+  Future<void> _askForAISearch(String imagePath) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('No se detectó código de barras'),
+        content: const Text(
+          '¿Quieres usar IA para identificar el producto en la imagen?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Usar IA'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && mounted) {
+      context.push('/ai-search', extra: imagePath);
     }
   }
 
@@ -138,13 +187,13 @@ class _ScannerScreenState extends State<ScannerScreen>
 
   Future<void> _saveToHistory(ProductSearchResult result) async {
     if (_historyLocal == null) return;
-    
+
     final history = SearchHistory(
       barcode: result.product.barcode,
       productName: result.product.name,
       imageUrl: result.product.imageUrl,
-      lowestPrice: result.lowestPrice?.totalPrice,
-      platform: result.lowestPrice?.platform,
+      brand: result.product.brand,
+      category: result.product.category,
       searchedAt: DateTime.now(),
     );
 
@@ -170,7 +219,6 @@ class _ScannerScreenState extends State<ScannerScreen>
           onPressed: () => context.pop(),
         ),
         actions: [
-          // Historial
           IconButton(
             icon: Container(
               padding: const EdgeInsets.all(8),
@@ -189,15 +237,12 @@ class _ScannerScreenState extends State<ScannerScreen>
           BlocListener<ProductBloc, ProductState>(
             listener: (context, state) async {
               if (state is ProductSearchSuccess) {
-                // Guardar en historial
                 await _saveToHistory(state.result);
 
-                // Navegar a resultados
                 if (mounted) {
                   context.push('/results');
                 }
 
-                // Reset para siguiente escaneo
                 Future.delayed(const Duration(milliseconds: 500), () {
                   if (mounted) {
                     _isProcessing = false;
@@ -221,12 +266,13 @@ class _ScannerScreenState extends State<ScannerScreen>
               onDetect: _onDetect,
             ),
 
-            // Overlay con área de escaneo
+            // Overlay
             BlocBuilder<ScannerBloc, ScannerState>(
               builder: (context, state) {
                 return BarcodeOverlay(
                   isDetecting: state is ScannerDetecting,
-                  detectedBarcode: state is ScannerDetecting ? state.barcode : null,
+                  detectedBarcode:
+                      state is ScannerDetecting ? state.barcode : null,
                 );
               },
             ),
@@ -242,36 +288,67 @@ class _ScannerScreenState extends State<ScannerScreen>
                     builder: (context, productState) {
                       final isSearching = productState is ProductSearching;
 
-                      return Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      return Column(
                         children: [
-                          // Flash
-                          _ControlButton(
-                            icon: scannerState.isFlashOn
-                                ? Icons.flash_on
-                                : Icons.flash_off,
-                            label: 'Flash',
-                            isActive: scannerState.isFlashOn,
-                            onPressed: () {
-                              _scannerController.toggleTorch();
-                              context.read<ScannerBloc>().add(ToggleFlash());
-                            },
+                          // Botón principal: Capturar foto para IA (NUEVO)
+                          Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 60),
+                            child: ElevatedButton.icon(
+                              onPressed: isSearching ? null : _searchByPhoto,
+                              icon: const Icon(Icons.camera_alt, size: 28),
+                              label: const Text(
+                                'BUSCAR POR FOTO',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(30),
+                                ),
+                              ),
+                            ),
                           ),
+                          const SizedBox(height: 20),
 
-                          // Galería
-                          _ControlButton(
-                            icon: Icons.photo_library,
-                            label: 'Galería',
-                            onPressed: isSearching ? null : _scanFromGallery,
-                          ),
+                          // Botones secundarios
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              // Flash
+                              _ControlButton(
+                                icon: scannerState.isFlashOn
+                                    ? Icons.flash_on
+                                    : Icons.flash_off,
+                                label: 'Flash',
+                                isActive: scannerState.isFlashOn,
+                                onPressed: () {
+                                  _scannerController.toggleTorch();
+                                  context.read<ScannerBloc>().add(ToggleFlash());
+                                },
+                              ),
 
-                          // Manual
-                          _ControlButton(
-                            icon: Icons.keyboard,
-                            label: 'Manual',
-                            onPressed: isSearching
-                                ? null
-                                : () => _showManualInputDialog(),
+                              // Galería
+                              _ControlButton(
+                                icon: Icons.photo_library,
+                                label: 'Galería',
+                                onPressed: isSearching ? null : _scanFromGallery,
+                              ),
+
+                              // Manual
+                              _ControlButton(
+                                icon: Icons.keyboard,
+                                label: 'Manual',
+                                onPressed:
+                                    isSearching ? null : _showManualInputDialog,
+                              ),
+                            ],
                           ),
                         ],
                       );
@@ -281,7 +358,7 @@ class _ScannerScreenState extends State<ScannerScreen>
               ),
             ),
 
-            // Loading indicator
+            // Loading
             BlocBuilder<ProductBloc, ProductState>(
               builder: (context, state) {
                 if (state is ProductSearching) {
@@ -295,10 +372,7 @@ class _ScannerScreenState extends State<ScannerScreen>
                           SizedBox(height: 16),
                           Text(
                             'Buscando producto...',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                            ),
+                            style: TextStyle(color: Colors.white, fontSize: 16),
                           ),
                         ],
                       ),
@@ -376,13 +450,9 @@ class _ControlButton extends StatelessWidget {
           width: 60,
           height: 60,
           decoration: BoxDecoration(
-            color: isActive
-                ? Colors.blue
-                : Colors.black.withOpacity(0.7),
+            color: isActive ? Colors.blue : Colors.black.withOpacity(0.7),
             shape: BoxShape.circle,
-            border: isActive
-                ? Border.all(color: Colors.white, width: 2)
-                : null,
+            border: isActive ? Border.all(color: Colors.white, width: 2) : null,
           ),
           child: IconButton(
             icon: Icon(icon, color: Colors.white),
