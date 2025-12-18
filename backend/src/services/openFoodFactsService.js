@@ -63,7 +63,11 @@ class OpenFoodFactsService {
             return null;
 
         } catch (error) {
-            console.error('   ❌ Error Open Food Facts:', error.message);
+            if (error.response && error.response.status === 404) {
+                console.warn(`   ⚠️ OFF: Producto ${barcode} no encontrado (404)`);
+            } else {
+                console.error('   ❌ Error Open Food Facts:', error.message);
+            }
             return null;
         }
     }

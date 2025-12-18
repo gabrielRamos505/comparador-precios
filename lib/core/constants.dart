@@ -1,6 +1,6 @@
 class AppConstants {
   // ⭐ Base URLs
-  static const String backendUrl = 'http://192.168.100.14:3000/api';
+  static const String backendUrl = 'https://comparador-precios-w3mm.onrender.com/api';
   
   // Como usas 'baseUrl' en algunos lados y 'backendUrl' en otros,
   // es mejor que una apunte a la otra para no confundirte.
