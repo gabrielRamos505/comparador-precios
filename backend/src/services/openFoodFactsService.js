@@ -31,17 +31,28 @@ class OpenFoodFactsService {
                 const quantity = product.quantity || product.product_quantity || ''; // Ej: "500 ml"
 
                 // 2. Limpieza inteligente
-                // A veces el cleaner borra la cantidad. La recuperamos.
-                let cleanedName = productNameCleaner.clean(originalName, brand);
+                // Si la marca es "Aje" y es agua, probablemente es "Cielo"
+                let brandCorrection = brand;
+                if (brand.toLowerCase().includes('aje') && originalName.toLowerCase().includes('agua')) {
+                    brandCorrection = 'Cielo';
+                }
+
+                let cleanedName = productNameCleaner.clean(originalName, brandCorrection);
+
+                // Si cleanedName es muy corto o genérico, intentamos mejorarlo
+                if (cleanedName.length < 10 && !cleanedName.toLowerCase().includes(brandCorrection.toLowerCase())) {
+                    cleanedName = `${brandCorrection} ${cleanedName}`;
+                }
 
                 // Si la cantidad no está en el nombre limpio, la agregamos para ayudar a los scrapers
-                if (quantity && !cleanedName.includes(quantity)) {
+                if (quantity && !cleanedName.toLowerCase().includes(quantity.toLowerCase())) {
                     cleanedName = `${cleanedName} ${quantity}`;
                 }
 
                 console.log(`📦 Producto OpenFoodFacts:`);
                 console.log(`   Original: "${originalName}"`);
                 console.log(`   Cantidad: "${quantity}"`);
+                console.log(`   Marca/Corección: "${brandCorrection}"`);
                 console.log(`   Búsqueda: "${cleanedName}"`);
 
                 return {

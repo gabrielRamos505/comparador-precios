@@ -5,7 +5,7 @@ set -o errexit
 # Instalar dependencias
 npm install
 
-# Instalar navegador Chrome para Puppeteer
-# Forzar permisos de ejecución en el binario de puppeteer para evitar "Permission denied"
+# Instalar navegador Chrome para Puppeteer (usará .puppeteerrc.cjs)
+# Forzamos permisos de ejecución en el binario por seguridad
 chmod +x ./node_modules/.bin/puppeteer
 ./node_modules/.bin/puppeteer browsers install chrome

@@ -12,8 +12,17 @@ class MercadoLibreScraper {
         console.log(`   🛒 ML (Scraping): "${decodeURIComponent(cleanQuery)}"`);
 
         const browser = await puppeteer.launch({
-            headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1366,768']
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+            ]
         });
 
         try {
