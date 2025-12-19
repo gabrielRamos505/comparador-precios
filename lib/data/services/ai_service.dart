@@ -12,10 +12,10 @@ class AIService {
     final dio = Dio(
       BaseOptions(
         baseUrl: AppConstants.backendUrl,
-        // ⚠️ Aumentado a 90s para dar tiempo al scraping si la IA encuentra el producto rápido
-        connectTimeout: const Duration(seconds: 60),
-        receiveTimeout: const Duration(seconds: 90), 
-        sendTimeout: const Duration(seconds: 60),
+        // Usamos constantes globales aumentadas
+        connectTimeout: AppConstants.connectionTimeout,
+        receiveTimeout: AppConstants.receiveTimeout, 
+        sendTimeout: AppConstants.connectionTimeout,
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',

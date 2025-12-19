@@ -9,11 +9,11 @@ class AppConstants {
   // Config
   static const bool useMockData = false;
  
-  // ⚠️ CORRECCIÓN CRÍTICA: Timeouts aumentados
-  // El scraping puede tardar ~50s, así que ponemos 90s para evitar errores.
-  static const Duration apiTimeout = Duration(seconds: 90);
+  // ⚠️ Configuración de Timeout aumentado para permitir Scraping intensivo
+  // Tottus/Wong pueden tardar 45s+ en responder.
+  static const Duration apiTimeout = Duration(seconds: 120);
   static const Duration connectionTimeout = Duration(seconds: 60);
-  static const Duration receiveTimeout = Duration(seconds: 90); 
+  static const Duration receiveTimeout = Duration(seconds: 120); 
  
   // Keys para SharedPreferences
   static const String tokenKey = 'auth_token';

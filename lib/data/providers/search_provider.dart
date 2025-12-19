@@ -13,10 +13,11 @@ class SearchProvider {
     final dio = Dio(
       BaseOptions(
         baseUrl: AppConstants.backendUrl,
-        // ⚠️ CRÍTICO: 90s para aguantar el scraping
-        connectTimeout: const Duration(seconds: 60),
-        receiveTimeout: const Duration(seconds: 90), 
-        sendTimeout: const Duration(seconds: 60),
+        baseUrl: AppConstants.backendUrl,
+        // Usamos constantes globales aumentadas
+        connectTimeout: AppConstants.connectionTimeout,
+        receiveTimeout: AppConstants.receiveTimeout, 
+        sendTimeout: AppConstants.connectionTimeout,
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',

@@ -38,12 +38,20 @@ class WongScraper {
             });
 
             const url = `${this.baseUrl}/busca?ft=${encodeURIComponent(query)}`;
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
+            // Timeout Aumentado por solicitud: 12s -> 45s
             try {
-                await page.waitForSelector('.vtex-product-summary-2-x-container, .product-item', { timeout: 10000 });
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
             } catch (e) {
-                console.log('      ⚠️ Wong: Timeout esperando selector');
+                console.log('      ⚠️ Wong: Timeout al cargar página (45s)');
+                return [];
+            }
+
+            // Timeout Selector Aumentado: 5s -> 30s
+            try {
+                await page.waitForSelector('.vtex-product-summary-2-x-container, .product-item', { timeout: 30000 });
+            } catch (e) {
+                console.log('      ⚠️ Wong: Timeout esperando selector (30s)');
                 return [];
             }
 
@@ -57,14 +65,12 @@ class WongScraper {
                     const nameEl = card.querySelector('.vtex-product-summary-2-x-brandName, .product-name');
                     const priceEl = card.querySelector('.vtex-product-summary-2-x-currencyInteger, .product-price');
                     const linkEl = card.querySelector('a');
-                    const imgEl = card.querySelector('img');
 
                     if (nameEl && priceEl) {
                         const name = nameEl.innerText.trim();
                         const priceText = priceEl.innerText.replace(/[^\d.]/g, '');
                         const price = parseFloat(priceText);
                         const link = linkEl ? linkEl.href : null;
-                        const image = imgEl ? imgEl.src : null;
 
                         if (name && !isNaN(price) && price > 0) {
                             items.push({
@@ -73,7 +79,7 @@ class WongScraper {
                                 price: price,
                                 currency: 'PEN',
                                 url: link,
-                                imageUrl: image,
+                                imageUrl: null,
                                 available: true,
                                 shipping: 0
                             });

@@ -14,10 +14,10 @@ class ApiProvider {
       BaseOptions(
         baseUrl: AppConstants.backendUrl, // Asegúrate de que sea tu IP (192.168.x.x)
         
-        // ⚠️ CAMBIO CRÍTICO: Aumentar a 90 segundos para aguantar el Scraping
-        connectTimeout: const Duration(seconds: 60),
-        receiveTimeout: const Duration(seconds: 90), 
-        sendTimeout: const Duration(seconds: 60),
+        // Usamos constantes globales aumentadas
+        connectTimeout: AppConstants.connectionTimeout,
+        receiveTimeout: AppConstants.receiveTimeout, 
+        sendTimeout: AppConstants.connectionTimeout,
         
         headers: {
           'Content-Type': 'application/json',

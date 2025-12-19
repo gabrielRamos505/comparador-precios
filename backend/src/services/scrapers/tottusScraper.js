@@ -29,7 +29,7 @@ class TottusScraper {
 
             const page = await browser.newPage();
 
-            // Bloqueo agresivo de recursos para velocidad
+            // Bloqueo agresivo
             await page.setRequestInterception(true);
             page.on('request', (req) => {
                 if (['image', 'font', 'stylesheet', 'media'].includes(req.resourceType())) {
@@ -39,22 +39,26 @@ class TottusScraper {
                 }
             });
 
-            // Navegar a búsqueda
             const url = `${this.baseUrl}/buscar?q=${encodeURIComponent(query)}`;
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-            // Esperar selector genérico de producto Tottus
+            // Timeout Aumentado por solicitud: 45s (Estándar para que Tottus termine)
             try {
-                await page.waitForSelector('li div[class*="product-card"], a[href*="/p/"]', { timeout: 10000 });
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
             } catch (e) {
-                console.log('      ⚠️ Tottus: Timeout esperando selector');
+                console.log('      ⚠️ Tottus: Timeout al cargar página (45s)');
+                return [];
+            }
+
+            // Timeout Selector Aumentado: 30s
+            try {
+                await page.waitForSelector('li div[class*="product-card"], a[href*="/p/"]', { timeout: 30000 });
+            } catch (e) {
+                console.log('      ⚠️ Tottus: Timeout esperando selector (30s)');
                 return [];
             }
 
             const products = await page.evaluate(() => {
                 const items = [];
-                // Intentamos selectores comunes de Tottus (pueden variar)
-                // Buscamos contenedores que parezcan productos
                 const cards = document.querySelectorAll('li[class*="product-card"], div[class*="product-card"]');
 
                 cards.forEach(card => {
@@ -63,15 +67,12 @@ class TottusScraper {
                     const nameEl = card.querySelector('h2, div[class*="name"], span[class*="name"]');
                     const priceEl = card.querySelector('span[class*="price"], div[class*="price"]');
                     const linkEl = card.querySelector('a');
-                    const imgEl = card.querySelector('img');
 
                     if (nameEl && priceEl) {
                         const name = nameEl.innerText.trim();
-                        // Limpieza de precio: "S/ 10.90" -> 10.90
                         const priceText = priceEl.innerText.replace(/[^\d.]/g, '');
                         const price = parseFloat(priceText);
                         const link = linkEl ? linkEl.href : null;
-                        const image = imgEl ? imgEl.src : null;
 
                         if (name && !isNaN(price) && price > 0) {
                             items.push({
@@ -80,7 +81,7 @@ class TottusScraper {
                                 price: price,
                                 currency: 'PEN',
                                 url: link,
-                                imageUrl: image,
+                                imageUrl: null,
                                 available: true,
                                 shipping: 0
                             });

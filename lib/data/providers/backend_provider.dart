@@ -12,11 +12,10 @@ class BackendProvider {
       BaseOptions(
         baseUrl: AppConstants.backendUrl,
         
-        // ⚠️ CORRECCIÓN CRÍTICA: Aumentar Timeouts
-        // El scraping demora entre 30s y 60s. Si dejas 10s, fallará siempre.
-        connectTimeout: const Duration(seconds: 60),
-        receiveTimeout: const Duration(seconds: 90), 
-        sendTimeout: const Duration(seconds: 60),
+        // Usamos constantes globales aumentadas
+        connectTimeout: AppConstants.connectionTimeout,
+        receiveTimeout: AppConstants.receiveTimeout, 
+        sendTimeout: AppConstants.connectionTimeout,
         
         headers: {
           'Content-Type': 'application/json',
