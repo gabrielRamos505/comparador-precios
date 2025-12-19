@@ -1,52 +1,16 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-
 puppeteer.use(StealthPlugin());
 
 class TottusScraper {
     constructor() {
         this.baseUrl = 'https://www.tottus.com.pe';
-        this.lastRequestTime = 0;
     }
 
-    async rateLimit() {
-        const now = Date.now();
-        const timeSinceLastRequest = now - this.lastRequestTime;
-        const minDelay = 6000; // Tottus es sensible, aumentamos un poco el delay
-
-        if (timeSinceLastRequest < minDelay) {
-            await new Promise(resolve => setTimeout(resolve, minDelay - timeSinceLastRequest));
-        }
-
-        this.lastRequestTime = Date.now();
-    }
-
-    cleanProductName(productName) {
-        const stopWords = ['sin', 'con', 'x', 'ml', 'gr', 'kg', 'lt', 'pack', 'unidad', 'botella'];
-
-        // Normalización: Eliminar tildes para la URL de búsqueda
-        const normalized = productName.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-        const words = normalized
-            .toLowerCase()
-            .replace(/[^\w\s]/g, ' ')
-            .replace(/\d+/g, '')
-            .split(/\s+/)
-            .filter(word => word.length > 2)
-            .filter(word => !stopWords.includes(word));
-
-        return words.slice(0, 3).join('%20');
-    }
-
-    async searchProducts(productName) {
-        await this.rateLimit();
+    async searchProducts(query) {
         let browser;
-
         try {
-            const keywords = this.cleanProductName(productName);
-            if (keywords.length < 3) return [];
-
-            console.log(`   🛍️ Buscando en Tottus: "${decodeURIComponent(keywords)}"`);
+            console.log(`   🏬 (Puppeteer) Buscando en Tottus: "${query}"`);
 
             browser = await puppeteer.launch({
                 headless: true,
@@ -58,135 +22,81 @@ class TottusScraper {
                     '--no-first-run',
                     '--no-zygote',
                     '--single-process',
-                    '--disable-gpu'
+                    '--disable-gpu',
+                    '--window-size=1366,768'
                 ]
             });
 
             const page = await browser.newPage();
 
-            // ✅ ACELERACIÓN: Bloquear recursos innecesarios
+            // Bloqueo agresivo de recursos para velocidad
             await page.setRequestInterception(true);
             page.on('request', (req) => {
-                const resourceType = req.resourceType();
-                if (['image', 'font', 'stylesheet', 'media', 'other'].includes(resourceType)) {
+                if (['image', 'font', 'stylesheet', 'media'].includes(req.resourceType())) {
                     req.abort();
                 } else {
                     req.continue();
                 }
             });
 
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-            await page.setViewport({ width: 1366, height: 768 });
+            // Navegar a búsqueda
+            const url = `${this.baseUrl}/buscar?q=${encodeURIComponent(query)}`;
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-            // Headers para simular navegación real
-            await page.setExtraHTTPHeaders({
-                'Accept-Language': 'es-PE,es-419;q=0.9,es;q=0.8',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Referer': 'https://www.google.com/'
-            });
-
-            // ✅ URL moderna de búsqueda en Tottus
-            const searchUrl = `${this.baseUrl}/buscar?q=${keywords}`;
-            console.log(`      📍 URL: ${searchUrl}`);
-
-            // 1. Evitar Timeout esperando trackers (load + Bloqueo de recursos)
-            await page.goto(searchUrl, {
-                waitUntil: 'load',
-                timeout: 30000
-            });
-
-            // 2. Esperar selectores (Soporta estructura antigua y nueva de Tottus)
-            console.log('      ⏳ Esperando renderizado...');
+            // Esperar selector genérico de producto Tottus
             try {
-                // Tottus usa 'li' con clases específicas o divs de VTEX
-                await page.waitForSelector('li[class*="product"], div[class*="product-summary"], div[class*="card"]', { timeout: 15000 });
+                await page.waitForSelector('li div[class*="product-card"], a[href*="/p/"]', { timeout: 10000 });
             } catch (e) {
-                console.log('      ⚠️ Timeout esperando selector inicial (puede que no haya resultados o requiera scroll)');
+                console.log('      ⚠️ Tottus: Timeout esperando selector');
+                return [];
             }
 
-            // 3. Scroll agresivo (Tottus es muy pesado con lazy load)
-            await page.evaluate(async () => {
-                await new Promise((resolve) => {
-                    let totalHeight = 0;
-                    const distance = 150;
-                    const timer = setInterval(() => {
-                        const scrollHeight = document.body.scrollHeight;
-                        window.scrollBy(0, distance);
-                        totalHeight += distance;
-                        if (totalHeight >= scrollHeight || totalHeight > 2500) {
-                            clearInterval(timer);
-                            resolve();
-                        }
-                    }, 100);
-                });
-            });
-
-            // 4. Extracción Robusta con selectores de anclaje .pod-link
             const products = await page.evaluate(() => {
                 const items = [];
-                // Selector principal en Tottus (es un enlace que envuelve la tarjeta)
-                const containers = document.querySelectorAll('a.pod-link');
+                // Intentamos selectores comunes de Tottus (pueden variar)
+                // Buscamos contenedores que parezcan productos
+                const cards = document.querySelectorAll('li[class*="product-card"], div[class*="product-card"]');
 
-                if (containers.length === 0) return [];
+                cards.forEach(card => {
+                    if (items.length >= 5) return;
 
-                containers.forEach((container, index) => {
-                    if (index >= 8) return;
+                    const nameEl = card.querySelector('h2, div[class*="name"], span[class*="name"]');
+                    const priceEl = card.querySelector('span[class*="price"], div[class*="price"]');
+                    const linkEl = card.querySelector('a');
+                    const imgEl = card.querySelector('img');
 
-                    try {
-                        // Nombre
-                        // El nombre suele estar en el segundo tag <b>
-                        const bTags = container.querySelectorAll('b');
-                        const name = bTags.length >= 2 ? bTags[1].textContent.trim() : (bTags[0]?.textContent.trim() || null);
+                    if (nameEl && priceEl) {
+                        const name = nameEl.innerText.trim();
+                        // Limpieza de precio: "S/ 10.90" -> 10.90
+                        const priceText = priceEl.innerText.replace(/[^\d.]/g, '');
+                        const price = parseFloat(priceText);
+                        const link = linkEl ? linkEl.href : null;
+                        const image = imgEl ? imgEl.src : null;
 
-                        // Precio
-                        // Buscamos el span que contenga el símbolo de moneda S/
-                        const allSpans = container.querySelectorAll('span');
-                        let price = 0;
-                        for (const span of allSpans) {
-                            if (span.innerText.includes('S/ ')) {
-                                const priceText = span.innerText.replace(/[^\d.]/g, '');
-                                price = parseFloat(priceText);
-                                if (price > 0) break;
-                            }
+                        if (name && !isNaN(price) && price > 0) {
+                            items.push({
+                                platform: 'Tottus',
+                                name: name,
+                                price: price,
+                                currency: 'PEN',
+                                url: link,
+                                imageUrl: image,
+                                available: true,
+                                shipping: 0
+                            });
                         }
-
-                        // URL (Es el href del mismo contenedor)
-                        const url = container.href;
-
-                        // Imagen
-                        const imgEl = container.querySelector('img');
-                        const imageUrl = imgEl ? (imgEl.src || imgEl.getAttribute('data-src')) : null;
-
-                        // Validación básica
-                        if (name && price > 0) {
-                            items.push({ name, price, url, imageUrl });
-                        }
-                    } catch (e) {
-                        // Ignorar errores puntuales
                     }
                 });
-
                 return items;
             });
 
-            const formattedProducts = products.map(p => ({
-                name: p.name,
-                price: p.price,
-                currency: 'PEN',
-                url: p.url || this.baseUrl,
-                imageUrl: p.imageUrl,
-                platform: 'Tottus',
-                available: true
-            }));
-
-            if (formattedProducts.length > 0) {
-                const minPrice = Math.min(...formattedProducts.map(p => p.price));
-                console.log(`      ✅ Tottus: ${formattedProducts.length} productos (desde S/ ${minPrice.toFixed(2)})`);
+            if (products.length > 0) {
+                console.log(`      ✅ Tottus: ${products.length} encontrados (Min: S/ ${Math.min(...products.map(p => p.price)).toFixed(2)})`);
             } else {
                 console.log(`      ⚠️ Tottus: Sin resultados visibles`);
             }
 
-            return formattedProducts;
+            return products;
 
         } catch (error) {
             console.error(`      ❌ Tottus Error: ${error.message}`);

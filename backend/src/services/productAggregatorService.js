@@ -45,19 +45,58 @@ class ProductAggregatorService {
         console.log(`🔍 Searching for barcode: ${barcode}`);
 
         try {
-            // 1. Obtener info base de OpenFoodFacts
-            const productInfo = await openFoodFactsService.getProductByBarcode(barcode);
+            // 1. Intentar con OpenFoodFacts (Alimentos)
+            let productInfo = await openFoodFactsService.getProductByBarcode(barcode);
+
+            // 2. Fallback: Si no es alimento, buscar en Google/Amazon (Objetos)
+            if (!productInfo) {
+                console.log('   ⚠️ No encontrado en OpenFoodFacts. Intentando fallback (Objetos)...');
+
+                // Intentamos buscar el código en Google Shopping/Amazon a través de SerpAPI
+                // A veces Google reconoce el código y devuelve el producto
+                const fallbackResults = await serpApiService.searchAllPlatforms(barcode);
+
+                if (fallbackResults && fallbackResults.length > 0) {
+                    // Tomamos el primer resultado como la "identificación" del producto
+                    const bestMatch = fallbackResults[0];
+                    console.log(`   ✅ Identificado por Fallback: "${bestMatch.name}"`);
+
+                    productInfo = {
+                        id: barcode,
+                        barcode: barcode,
+                        name: bestMatch.name,
+                        brand: bestMatch.platform, // Usamos la tienda como "brand" temporal
+                        imageUrl: bestMatch.imageUrl,
+                        source: 'Web Search Fallback'
+                    };
+                } else {
+                    // Intento final con Amazon Scraper directo si SerpAPI falla
+                    const amazonResults = await require('./amazonScraperService').searchProduct(barcode);
+                    if (amazonResults && amazonResults.length > 0) {
+                        const bestMatch = amazonResults[0];
+                        console.log(`   ✅ Identificado por Amazon: "${bestMatch.name}"`);
+                        productInfo = {
+                            id: barcode,
+                            barcode: barcode,
+                            name: bestMatch.name,
+                            brand: 'Amazon',
+                            imageUrl: bestMatch.imageUrl,
+                            source: 'Amazon Fallback'
+                        };
+                    }
+                }
+            }
 
             if (!productInfo) {
-                throw new Error('Producto no encontrado en OpenFoodFacts');
+                throw new Error('Producto no encontrado en ninguna base de datos (OFF, Google, Amazon)');
             }
 
             console.log(`📦 Product identified: ${productInfo.name} (${productInfo.brand || 'Marca desconocida'})`);
 
-            // 2. Buscar precios usando el nombre
+            // 3. Buscar precios usando el nombre identificado
             const priceResults = await this.searchPricesByName(productInfo.name);
 
-            // 3. Guardar historial si hay usuario
+            // 4. Guardar historial si hay usuario
             if (userId) {
                 historyService.addSearchHistory(userId, productInfo, barcode).catch(e =>
                     console.error('   ⚠️ Error guardando historial:', e.message)
