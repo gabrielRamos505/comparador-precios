@@ -243,52 +243,49 @@ class ProductAggregatorService {
         const startTime = Date.now();
         const results = [];
 
-        const batch1 = [
+        // Definimos las tiendas y sus scrapers
+        const stores = [
             { name: 'Metro', scraper: metroScraper },
-            { name: 'Wong', scraper: wongScraper }
-        ];
-
-        const batch2 = [
             { name: 'Plaza Vea', scraper: plazaVeaScraper },
+            { name: 'Wong', scraper: wongScraper },
             { name: 'Tottus', scraper: tottusScraper }
         ];
 
-        const processBatch = async (batch, query) => {
-            const batchResults = [];
-            for (const store of batch) {
-                try {
-                    console.log(`   👉 Consultando ${store.name}...`);
-                    const products = await store.scraper.searchProducts(query);
-                    if (products.length > 0) {
-                        console.log(`      ✅ ${store.name}: ${products.length} encontrados`);
-                        batchResults.push(...products);
+        try {
+            // PROMISE.ALL: Ejecutamos TODOS en paralelo
+            // Metro/PV consumen 0 CPU (API). Wong/Tottus consumen CPU (Puppeteer).
+            // Esto reduce el tiempo total de Suma(Tiempos) a Max(Tiempos).
+            const promises = stores.map(store =>
+                store.scraper.searchProducts(productName)
+                    .then(products => ({
+                        status: 'fulfilled',
+                        store: store.name,
+                        products: products
+                    }))
+                    .catch(error => ({
+                        status: 'rejected',
+                        store: store.name,
+                        error: error.message
+                    }))
+            );
+
+            const outcomes = await Promise.all(promises);
+
+            outcomes.forEach(outcome => {
+                if (outcome.status === 'fulfilled') {
+                    if (outcome.products.length > 0) {
+                        console.log(`      ✅ ${outcome.store}: ${outcome.products.length} encontrados`);
+                        results.push(...outcome.products);
                     } else {
-                        console.log(`      ⚠️ ${store.name}: Sin resultados`);
+                        console.log(`      ⚠️ ${outcome.store}: Sin resultados`);
                     }
-                } catch (error) {
-                    console.error(`      ❌ Error en ${store.name}: ${error.message}`);
+                } else {
+                    console.error(`      ❌ Error en ${outcome.store}: ${outcome.error}`);
                 }
-            }
-            return batchResults;
-        };
+            });
 
-        const results1 = await processBatch(batch1, productName);
-        results.push(...results1.flat());
-
-        const results2 = await processBatch(batch2, productName);
-        results.push(...results2.flat());
-
-        // REINTENTO CON QUERY CORTA: Si no hay resultados en supermercados peruanos
-        if (results.length === 0) {
-            const shortName = productName.split(' ').slice(0, 2).join(' ');
-            if (shortName.length >= 3 && shortName.toLowerCase() !== productName.toLowerCase()) {
-                console.log(`\n🔄 Sin resultados en tiendas. Reintentando con query más corta: "${shortName}"...`);
-                const resultsRetry1 = await processBatch(batch1.map(s => ({ ...s, name: s.name + ' (Retry)' })), shortName);
-                results.push(...resultsRetry1.flat());
-
-                const resultsRetry2 = await processBatch(batch2.map(s => ({ ...s, name: s.name + ' (Retry)' })), shortName);
-                results.push(...resultsRetry2.flat());
-            }
+        } catch (error) {
+            console.error('❌ Error crítico en scraping paralelo:', error);
         }
 
         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
