@@ -53,10 +53,42 @@ class SerpApiService {
                 available: true
             }));
 
+            // ✅ FILTRO 1: Eliminar precios inválidos o cero
             const validResults = formattedResults.filter(p => p.price > 0);
 
-            console.log(`   ✅ SerpAPI: ${validResults.length} resultados`);
-            return validResults;
+            // ✅ FILTRO 2: Eliminar precios irreales para productos comunes
+            // Para agua/bebidas/alimentos, precios > S/ 50 suelen ser packs o productos incorrectos
+            const reasonablePrices = validResults.filter(p => {
+                // Rango razonable: S/ 0.50 - S/ 50.00 (cubre desde agua hasta productos más caros)
+                return p.price >= 0.5 && p.price <= 50;
+            });
+
+            // ✅ FILTRO 3: Eliminar outliers estadísticos usando IQR (Interquartile Range)
+            let finalResults = reasonablePrices;
+
+            if (reasonablePrices.length > 4) {
+                const sortedPrices = reasonablePrices.map(p => p.price).sort((a, b) => a - b);
+                const q1Index = Math.floor(sortedPrices.length * 0.25);
+                const q3Index = Math.floor(sortedPrices.length * 0.75);
+                const q1 = sortedPrices[q1Index];
+                const q3 = sortedPrices[q3Index];
+                const iqr = q3 - q1;
+
+                // Límites: Q1 - 1.5*IQR y Q3 + 1.5*IQR
+                const lowerBound = Math.max(0.5, q1 - (1.5 * iqr));
+                const upperBound = q3 + (1.5 * iqr);
+
+                finalResults = reasonablePrices.filter(p =>
+                    p.price >= lowerBound && p.price <= upperBound
+                );
+
+                if (finalResults.length < reasonablePrices.length) {
+                    console.log(`   🔍 SerpAPI: Filtrados ${reasonablePrices.length - finalResults.length} outliers (rango: S/ ${lowerBound.toFixed(2)} - S/ ${upperBound.toFixed(2)})`);
+                }
+            }
+
+            console.log(`   ✅ SerpAPI: ${finalResults.length} resultados`);
+            return finalResults;
 
         } catch (error) {
             // Logueamos el error pero NO dejamos que tumbe el servidor

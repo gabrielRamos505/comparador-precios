@@ -39,7 +39,8 @@ class TottusScraper {
                 }
             });
 
-            const url = `${this.baseUrl}/buscar?q=${encodeURIComponent(query)}`;
+            // ✅ URL CORREGIDA: Usar /tottus-pe/buscar?Ntt= en lugar de /buscar?q=
+            const url = `${this.baseUrl}/tottus-pe/buscar?Ntt=${encodeURIComponent(query)}`;
 
             // Timeout Aumentado por solicitud: 45s (Estándar para que Tottus termine)
             try {
@@ -49,45 +50,59 @@ class TottusScraper {
                 return [];
             }
 
-            // Timeout Selector Aumentado: 30s
+            // ✅ NUEVA ESTRATEGIA: Esperar por JSON-LD en lugar de selectores DOM
             try {
-                await page.waitForSelector('li div[class*="product-card"], a[href*="/p/"]', { timeout: 30000 });
+                await page.waitForSelector('script[type="application/ld+json"]', { timeout: 30000 });
             } catch (e) {
-                console.log('      ⚠️ Tottus: Timeout esperando selector (30s)');
+                console.log('      ⚠️ Tottus: Timeout esperando datos estructurados (30s)');
                 return [];
             }
 
+            // ✅ EXTRACCIÓN MEJORADA: Usar JSON-LD structured data
             const products = await page.evaluate(() => {
                 const items = [];
-                const cards = document.querySelectorAll('li[class*="product-card"], div[class*="product-card"]');
 
-                cards.forEach(card => {
-                    if (items.length >= 5) return;
+                try {
+                    // Buscar todos los scripts JSON-LD
+                    const scripts = document.querySelectorAll('script[type="application/ld+json"]');
 
-                    const nameEl = card.querySelector('h2, div[class*="name"], span[class*="name"]');
-                    const priceEl = card.querySelector('span[class*="price"], div[class*="price"]');
-                    const linkEl = card.querySelector('a');
+                    for (const script of scripts) {
+                        try {
+                            const data = JSON.parse(script.textContent);
 
-                    if (nameEl && priceEl) {
-                        const name = nameEl.innerText.trim();
-                        const priceText = priceEl.innerText.replace(/[^\d.]/g, '');
-                        const price = parseFloat(priceText);
-                        const link = linkEl ? linkEl.href : null;
+                            // Buscar ItemList con productos
+                            if (data['@type'] === 'ItemList' && data.itemListElement) {
+                                data.itemListElement.forEach(item => {
+                                    if (items.length >= 10) return;
 
-                        if (name && !isNaN(price) && price > 0) {
-                            items.push({
-                                platform: 'Tottus',
-                                name: name,
-                                price: price,
-                                currency: 'PEN',
-                                url: link,
-                                imageUrl: null,
-                                available: true,
-                                shipping: 0
-                            });
+                                    const product = item.item || item;
+
+                                    if (product.name && product.offers) {
+                                        const price = parseFloat(product.offers.price || product.offers.lowPrice || 0);
+
+                                        if (price > 0) {
+                                            items.push({
+                                                platform: 'Tottus',
+                                                name: product.name,
+                                                price: price,
+                                                currency: 'PEN',
+                                                url: product.url || product.offers.url || window.location.href,
+                                                imageUrl: product.image || null,
+                                                available: true,
+                                                shipping: 0
+                                            });
+                                        }
+                                    }
+                                });
+                            }
+                        } catch (parseError) {
+                            // Ignorar scripts JSON-LD mal formados
                         }
                     }
-                });
+                } catch (error) {
+                    console.error('Error parsing JSON-LD:', error);
+                }
+
                 return items;
             });
 

@@ -37,7 +37,9 @@ class WongScraper {
                 }
             });
 
-            const url = `${this.baseUrl}/busca?ft=${encodeURIComponent(query)}`;
+            // ✅ URL CORREGIDA: Usar /{query}?_q={query}&map=ft en lugar de /busca?ft=
+            const cleanQuery = query.toLowerCase().replace(/\s+/g, '+');
+            const url = `${this.baseUrl}/${cleanQuery}?_q=${cleanQuery}&map=ft`;
 
             // Timeout Aumentado por solicitud: 12s -> 45s
             try {
@@ -47,45 +49,86 @@ class WongScraper {
                 return [];
             }
 
-            // Timeout Selector Aumentado: 5s -> 30s
+            // ✅ NUEVA ESTRATEGIA: Esperar por meta tags en lugar de selectores VTEX
             try {
-                await page.waitForSelector('.vtex-product-summary-2-x-container, .product-item', { timeout: 30000 });
+                await page.waitForSelector('meta[property^="og:"]', { timeout: 30000 });
             } catch (e) {
-                console.log('      ⚠️ Wong: Timeout esperando selector (30s)');
+                console.log('      ⚠️ Wong: Timeout esperando meta tags (30s)');
                 return [];
             }
 
+            // ✅ EXTRACCIÓN MEJORADA: Usar meta tags Open Graph
             const products = await page.evaluate(() => {
                 const items = [];
-                const cards = document.querySelectorAll('.vtex-product-summary-2-x-container, .product-item');
 
-                cards.forEach(card => {
-                    if (items.length >= 5) return;
+                try {
+                    // Estrategia 1: Buscar productos en meta tags individuales
+                    const metaTags = document.querySelectorAll('meta[data-react-helmet="true"]');
+                    const productData = {};
 
-                    const nameEl = card.querySelector('.vtex-product-summary-2-x-brandName, .product-name');
-                    const priceEl = card.querySelector('.vtex-product-summary-2-x-currencyInteger, .product-price');
-                    const linkEl = card.querySelector('a');
+                    metaTags.forEach(meta => {
+                        const property = meta.getAttribute('property') || meta.getAttribute('name');
+                        const content = meta.getAttribute('content');
 
-                    if (nameEl && priceEl) {
-                        const name = nameEl.innerText.trim();
-                        const priceText = priceEl.innerText.replace(/[^\d.]/g, '');
-                        const price = parseFloat(priceText);
-                        const link = linkEl ? linkEl.href : null;
+                        if (property && content) {
+                            productData[property] = content;
+                        }
+                    });
 
-                        if (name && !isNaN(price) && price > 0) {
+                    // Si encontramos datos del producto en meta tags
+                    if (productData['og:title'] && productData['product:price:amount']) {
+                        const price = parseFloat(productData['product:price:amount']);
+
+                        if (price > 0) {
                             items.push({
                                 platform: 'Wong',
-                                name: name,
+                                name: productData['og:title'],
                                 price: price,
-                                currency: 'PEN',
-                                url: link,
-                                imageUrl: null,
+                                currency: productData['product:price:currency'] || 'PEN',
+                                url: productData['og:url'] || window.location.href,
+                                imageUrl: productData['og:image'] || null,
                                 available: true,
                                 shipping: 0
                             });
                         }
                     }
-                });
+
+                    // Estrategia 2: Fallback a selectores VTEX si meta tags no funcionan
+                    if (items.length === 0) {
+                        const cards = document.querySelectorAll('.vtex-product-summary-2-x-container, .vtex-search-result-3-x-galleryItem');
+
+                        cards.forEach(card => {
+                            if (items.length >= 10) return;
+
+                            const nameEl = card.querySelector('.vtex-product-summary-2-x-productBrand, .vtex-product-summary-2-x-brandName');
+                            const priceEl = card.querySelector('.vtex-product-summary-2-x-currencyInteger, [class*="sellingPrice"]');
+                            const linkEl = card.querySelector('a[href*="/p"]');
+
+                            if (nameEl && priceEl) {
+                                const name = nameEl.innerText.trim();
+                                const priceText = priceEl.innerText.replace(/[^\d.]/g, '');
+                                const price = parseFloat(priceText);
+                                const link = linkEl ? linkEl.href : null;
+
+                                if (name && !isNaN(price) && price > 0) {
+                                    items.push({
+                                        platform: 'Wong',
+                                        name: name,
+                                        price: price,
+                                        currency: 'PEN',
+                                        url: link || window.location.href,
+                                        imageUrl: null,
+                                        available: true,
+                                        shipping: 0
+                                    });
+                                }
+                            }
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error extracting Wong products:', error);
+                }
+
                 return items;
             });
 
