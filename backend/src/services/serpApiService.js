@@ -57,10 +57,10 @@ class SerpApiService {
             const validResults = formattedResults.filter(p => p.price > 0);
 
             // ✅ FILTRO 2: Eliminar precios irreales para productos comunes
-            // Para agua/bebidas/alimentos, precios > S/ 50 suelen ser packs o productos incorrectos
+            // Para agua/bebidas/alimentos, precios > S/ 20 suelen ser packs o productos incorrectos
             const reasonablePrices = validResults.filter(p => {
-                // Rango razonable: S/ 0.50 - S/ 50.00 (cubre desde agua hasta productos más caros)
-                return p.price >= 0.5 && p.price <= 50;
+                // Rango razonable: S/ 0.50 - S/ 20.00 (más estricto para evitar outliers)
+                return p.price >= 0.5 && p.price <= 20;
             });
 
             // ✅ FILTRO 3: Eliminar outliers estadísticos usando IQR (Interquartile Range)

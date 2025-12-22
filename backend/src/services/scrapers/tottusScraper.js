@@ -23,16 +23,19 @@ class TottusScraper {
                     '--no-zygote',
                     '--single-process',
                     '--disable-gpu',
+                    '--disable-software-rasterizer',
+                    '--disable-extensions',
                     '--window-size=1366,768'
                 ]
             });
 
             const page = await browser.newPage();
 
-            // Bloqueo agresivo
+            // Bloqueo más agresivo para velocidad (incluye scripts)
             await page.setRequestInterception(true);
             page.on('request', (req) => {
-                if (['image', 'font', 'stylesheet', 'media'].includes(req.resourceType())) {
+                const resourceType = req.resourceType();
+                if (['image', 'font', 'stylesheet', 'media', 'script'].includes(resourceType)) {
                     req.abort();
                 } else {
                     req.continue();
@@ -42,21 +45,16 @@ class TottusScraper {
             // ✅ URL CORREGIDA: Usar /tottus-pe/buscar?Ntt= en lugar de /buscar?q=
             const url = `${this.baseUrl}/tottus-pe/buscar?Ntt=${encodeURIComponent(query)}`;
 
-            // Timeout reducido: 15s (más rápido en Render)
+            // Timeout optimizado: 20s con networkidle0
             try {
-                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                await page.goto(url, { waitUntil: 'networkidle0', timeout: 20000 });
             } catch (e) {
-                console.log('      ⚠️ Tottus: Timeout al cargar página (15s)');
+                console.log('      ⚠️ Tottus: Timeout al cargar página (20s)');
                 return [];
             }
 
-            // Timeout reducido: 10s (fallar rápido si no hay datos)
-            try {
-                await page.waitForSelector('script[type="application/ld+json"]', { timeout: 10000 });
-            } catch (e) {
-                console.log('      ⚠️ Tottus: Timeout esperando datos estructurados (10s)');
-                return [];
-            }
+            // Esperar un poco para que se cargue el contenido
+            await page.waitForTimeout(2000);
 
             // ✅ EXTRACCIÓN MEJORADA: Usar JSON-LD structured data
             const products = await page.evaluate(() => {
@@ -65,6 +63,10 @@ class TottusScraper {
                 try {
                     // Buscar todos los scripts JSON-LD
                     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+
+                    if (scripts.length === 0) {
+                        return items; // No hay datos estructurados
+                    }
 
                     for (const script of scripts) {
                         try {
