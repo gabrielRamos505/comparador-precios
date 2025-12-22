@@ -42,19 +42,19 @@ class TottusScraper {
             // ✅ URL CORREGIDA: Usar /tottus-pe/buscar?Ntt= en lugar de /buscar?q=
             const url = `${this.baseUrl}/tottus-pe/buscar?Ntt=${encodeURIComponent(query)}`;
 
-            // Timeout Aumentado por solicitud: 45s (Estándar para que Tottus termine)
+            // Timeout reducido: 15s (más rápido en Render)
             try {
-                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
             } catch (e) {
-                console.log('      ⚠️ Tottus: Timeout al cargar página (45s)');
+                console.log('      ⚠️ Tottus: Timeout al cargar página (15s)');
                 return [];
             }
 
-            // ✅ NUEVA ESTRATEGIA: Esperar por JSON-LD en lugar de selectores DOM
+            // Timeout reducido: 10s (fallar rápido si no hay datos)
             try {
-                await page.waitForSelector('script[type="application/ld+json"]', { timeout: 30000 });
+                await page.waitForSelector('script[type="application/ld+json"]', { timeout: 10000 });
             } catch (e) {
-                console.log('      ⚠️ Tottus: Timeout esperando datos estructurados (30s)');
+                console.log('      ⚠️ Tottus: Timeout esperando datos estructurados (10s)');
                 return [];
             }
 

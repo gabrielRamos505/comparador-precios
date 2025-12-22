@@ -41,19 +41,19 @@ class WongScraper {
             const cleanQuery = query.toLowerCase().replace(/\s+/g, '+');
             const url = `${this.baseUrl}/${cleanQuery}?_q=${cleanQuery}&map=ft`;
 
-            // Timeout Aumentado por solicitud: 12s -> 45s
+            // Timeout reducido: 15s (más rápido en Render)
             try {
-                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
             } catch (e) {
-                console.log('      ⚠️ Wong: Timeout al cargar página (45s)');
+                console.log('      ⚠️ Wong: Timeout al cargar página (15s)');
                 return [];
             }
 
-            // ✅ NUEVA ESTRATEGIA: Esperar por meta tags en lugar de selectores VTEX
+            // Timeout reducido: 10s (fallar rápido si no hay datos)
             try {
-                await page.waitForSelector('meta[property^="og:"]', { timeout: 30000 });
+                await page.waitForSelector('meta[property^="og:"]', { timeout: 10000 });
             } catch (e) {
-                console.log('      ⚠️ Wong: Timeout esperando meta tags (30s)');
+                console.log('      ⚠️ Wong: Timeout esperando meta tags (10s)');
                 return [];
             }
 
