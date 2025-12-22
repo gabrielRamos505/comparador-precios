@@ -84,6 +84,7 @@ class TottusScraper {
 
                                         if (price > 0) {
                                             items.push({
+                                                id: product.sku || `tottus-${Math.random().toString(36).substr(2, 9)}`, // ✅ FIX: Agregar ID requerido por Flutter
                                                 platform: 'Tottus',
                                                 name: product.name,
                                                 price: price,
