@@ -31,11 +31,11 @@ class TottusScraper {
 
             const page = await browser.newPage();
 
-            // Bloqueo más agresivo para velocidad (incluye scripts)
+            // Bloqueo agresivo para velocidad (NO bloquear scripts, necesitamos JSON-LD)
             await page.setRequestInterception(true);
             page.on('request', (req) => {
                 const resourceType = req.resourceType();
-                if (['image', 'font', 'stylesheet', 'media', 'script'].includes(resourceType)) {
+                if (['image', 'font', 'stylesheet', 'media'].includes(resourceType)) {
                     req.abort();
                 } else {
                     req.continue();
@@ -45,16 +45,16 @@ class TottusScraper {
             // ✅ URL CORREGIDA: Usar /tottus-pe/buscar?Ntt= en lugar de /buscar?q=
             const url = `${this.baseUrl}/tottus-pe/buscar?Ntt=${encodeURIComponent(query)}`;
 
-            // Timeout optimizado: 20s con networkidle0
+            // Timeout optimizado: 20s con domcontentloaded
             try {
-                await page.goto(url, { waitUntil: 'networkidle0', timeout: 20000 });
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
             } catch (e) {
                 console.log('      ⚠️ Tottus: Timeout al cargar página (20s)');
                 return [];
             }
 
-            // Esperar un poco para que se cargue el contenido
-            await page.waitForTimeout(2000);
+            // Esperar un poco para que se cargue el contenido (usar setTimeout en lugar de waitForTimeout)
+            await new Promise(resolve => setTimeout(resolve, 3000));
 
             // ✅ EXTRACCIÓN MEJORADA: Usar JSON-LD structured data
             const products = await page.evaluate(() => {
