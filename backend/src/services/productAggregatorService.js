@@ -184,13 +184,16 @@ class ProductAggregatorService {
         allPrices.sort((a, b) => a.price - b.price);
         const uniquePrices = this.removeDuplicates(allPrices);
 
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`💰 RESULTADO FINAL: ${uniquePrices.length} opciones encontradas`);
+        // ✅ VALIDAR Y ARREGLAR URLs ANTES DE RETORNAR
+        const validatedPrices = this.validateAndFixUrls(uniquePrices, productName);
 
-        if (uniquePrices.length > 0) {
-            const minPrice = uniquePrices[0].price;
-            const maxPrice = uniquePrices[uniquePrices.length - 1].price;
-            const bestStore = uniquePrices[0].platform;
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`💰 RESULTADO FINAL: ${validatedPrices.length} opciones encontradas`);
+
+        if (validatedPrices.length > 0) {
+            const minPrice = validatedPrices[0].price;
+            const maxPrice = validatedPrices[validatedPrices.length - 1].price;
+            const bestStore = validatedPrices[0].platform;
             console.log(`💵 Mejor Precio: S/ ${minPrice.toFixed(2)} en ${bestStore}`);
             console.log(`📈 Precio Máximo: S/ ${maxPrice.toFixed(2)}`);
         } else {
@@ -198,7 +201,7 @@ class ProductAggregatorService {
         }
         console.log(`${'='.repeat(60)}\n`);
 
-        return uniquePrices;
+        return validatedPrices;
     }
 
     removeDuplicates(products) {
@@ -213,6 +216,39 @@ class ProductAggregatorService {
         });
 
         return Array.from(uniqueMap.values());
+    }
+
+    /**
+     * ✅ VALIDAR Y ARREGLAR URLs
+     * Asegura que todos los productos tengan URLs válidas y accesibles
+     */
+    validateAndFixUrls(products, searchQuery) {
+        return products.map(product => {
+            // Si la URL es inválida, null, undefined, o no empieza con http
+            if (!product.url ||
+                product.url === 'null' ||
+                product.url === 'undefined' ||
+                !product.url.startsWith('http')) {
+
+                // Generar URL de búsqueda según la tienda
+                const encodedQuery = encodeURIComponent(searchQuery);
+                const storeUrls = {
+                    'Metro': `https://www.metro.pe/${encodedQuery}`,
+                    'Plaza Vea': `https://www.plazavea.com.pe/${encodedQuery}`,
+                    'Wong': `https://www.wong.pe/${encodedQuery.toLowerCase().replace(/%20/g, '+')}?_q=${encodedQuery.toLowerCase().replace(/%20/g, '+')}&map=ft`,
+                    'Tottus': `https://www.tottus.com.pe/tottus-pe/buscar?Ntt=${encodedQuery}`,
+                    'Google Shopping': product.url || `https://www.google.com/search?q=${encodedQuery}+precio+peru`,
+                    'Mercado Libre': `https://listado.mercadolibre.com.pe/${encodedQuery}`
+                };
+
+                const fallbackUrl = storeUrls[product.platform] || `https://www.google.com/search?q=${encodedQuery}+${product.platform}`;
+
+                console.log(`   🔗 URL faltante en ${product.platform}, usando fallback`);
+                product.url = fallbackUrl;
+            }
+
+            return product;
+        }).filter(p => p.url && p.url.startsWith('http')); // Solo retornar productos con URLs válidas
     }
 
     async searchMercadoLibre(productName) {
