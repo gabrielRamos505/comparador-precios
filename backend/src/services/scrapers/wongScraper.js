@@ -30,7 +30,16 @@ class WongScraper {
 
             const products = response.data.slice(0, 10).map(item => {
                 const price = item.items[0]?.sellers[0]?.commertialOffer?.Price || 0;
-                const link = item.link ? `https://www.wong.pe${item.link}` : null;
+
+                // ✅ FIX: VTEX API ya retorna URLs completas, no agregar baseUrl si ya tiene protocolo
+                let link = item.link;
+                if (link) {
+                    // Si el link no empieza con http, agregar el baseUrl
+                    if (!link.startsWith('http')) {
+                        link = `https://www.wong.pe${link}`;
+                    }
+                    // Si ya tiene http, usarlo tal cual (evita duplicación)
+                }
 
                 return {
                     platform: 'Wong',
