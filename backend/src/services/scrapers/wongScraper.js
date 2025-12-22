@@ -42,6 +42,7 @@ class WongScraper {
                 }
 
                 return {
+                    id: item.productId || `wong-${Math.random().toString(36).substr(2, 9)}`, // ✅ FIX: Agregar ID requerido por Flutter
                     platform: 'Wong',
                     name: item.productName,
                     price: price,
