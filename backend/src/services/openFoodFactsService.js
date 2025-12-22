@@ -27,8 +27,22 @@ class OpenFoodFactsService {
 
                 // 1. Obtener datos crudos
                 const originalName = product.product_name || product.product_name_es || 'Producto desconocido';
-                const brand = product.brands || '';
+                let brand = product.brands || '';
                 const quantity = product.quantity || product.product_quantity || ''; // Ej: "500 ml"
+
+                // ✅ FIX: Si la marca está vacía, intentar extraerla del nombre del producto
+                if (!brand && originalName) {
+                    const nameLower = originalName.toLowerCase();
+                    // Marcas comunes en Perú
+                    if (nameLower.includes('cielo')) brand = 'Cielo';
+                    else if (nameLower.includes('san luis')) brand = 'San Luis';
+                    else if (nameLower.includes('san mateo')) brand = 'San Mateo';
+                    else if (nameLower.includes('coca cola') || nameLower.includes('coca-cola')) brand = 'Coca-Cola';
+                    else if (nameLower.includes('inca kola')) brand = 'Inca Kola';
+                    else if (nameLower.includes('pepsi')) brand = 'Pepsi';
+                    else if (nameLower.includes('sprite')) brand = 'Sprite';
+                    else if (nameLower.includes('fanta')) brand = 'Fanta';
+                }
 
                 // 2. Limpieza inteligente
                 // Si la marca es "Aje" y es agua, probablemente es "Cielo"
