@@ -326,7 +326,7 @@ class _PriceCard extends StatelessWidget {
     // Si el usuario confirmó
     if (shouldOpen == true && context.mounted) {
       try {
-        final uri = Uri.parse(price.url);
+        final uri = Uri.parse(price.url.trim());
         if (await canLaunchUrl(uri)) {
           await launchUrl(
             uri,
