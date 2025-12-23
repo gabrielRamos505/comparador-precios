@@ -7,7 +7,7 @@ const plazaVeaScraper = require('./scrapers/plazaVeaScraper');
 const wongScraper = require('./scrapers/wongScraper');
 const metroScraper = require('./scrapers/metroScraper');
 const tottusScraper = require('./scrapers/tottusScraper');
-const amazonScraper = require('./amazonScraperService'); // Movido arriba para consistencia
+const amazonScraper = require('./amazonScraperService');
 
 const historyService = require('./historyService');
 const aiService = require('./aiService');
@@ -23,12 +23,10 @@ class ProductAggregatorService {
         try {
             // Delegar a searchPricesByName que tiene toda la lógica de agregación
             const prices = await this.searchPricesByName(productName);
-
-            // Retornamos directamente el array para compatibilidad con Flutter (List<dynamic>)
             return prices || [];
         } catch (error) {
             console.error(`❌ Error en searchByName: ${error.message}`);
-            return []; // Retorno consistente para evitar crashes en el App
+            return [];
         }
     }
 
@@ -42,35 +40,50 @@ class ProductAggregatorService {
             let productInfo = null;
 
             // 1. Intentar con OpenFoodFacts (Alimentos)
-            // Solo si el barcode es válido y no es un ID temporal
             if (barcode && barcode !== 'unknown' && !barcode.startsWith('AI-')) {
                 try {
                     productInfo = await openFoodFactsService.getProductByBarcode(barcode);
+                    if (productInfo) {
+                        console.log('✅ Producto encontrado en OpenFoodFacts');
+                        // Normalizar estructura de OpenFoodFacts
+                        productInfo = {
+                            id: productInfo.id || barcode,
+                            barcode: barcode,
+                            name: productInfo.name || productInfo.product_name,
+                            brand: productInfo.brand || productInfo.brands || 'Genérico',
+                            category: productInfo.category || 'Alimentos',
+                            imageUrl: productInfo.imageUrl || productInfo.image_url,
+                            source: 'OpenFoodFacts'
+                        };
+                    }
                 } catch (e) {
                     console.log('⚠️ OpenFoodFacts no disponible o producto no encontrado.');
                 }
             }
 
-            // 2. Fallback 1: Si no está en OFF, intentar con IA (Si hay imagen disponible)
+            // 2. Fallback 1: Si no está en OFF, intentar con IA (Si hay imagen)
             if (!productInfo && imageBase64) {
-                console.log('🔄 Barcode no encontrado en base de datos. Iniciando IA Gemini...');
+                console.log('🔄 Barcode no encontrado. Iniciando IA Gemini...');
                 const aiResult = await aiService.identifyProduct(imageBase64);
 
-                if (aiResult && aiResult.name) {
+                if (aiResult && aiResult.success && aiResult.name) {
                     productInfo = {
                         id: aiResult.id || `AI-${Date.now()}`,
-                        barcode: barcode,
+                        barcode: barcode || aiResult.barcode || `AI-${Date.now()}`,
                         name: aiResult.name,
                         brand: aiResult.brand || 'Identificado por IA',
-                        imageUrl: aiResult.imageUrl,
-                        source: 'IA Vision Fallback'
+                        category: aiResult.category || 'General',
+                        imageUrl: aiResult.imageUrl || null,
+                        source: 'IA Vision',
+                        confidence: aiResult.confidence
                     };
+                    console.log(`✅ Producto identificado por IA: ${productInfo.name}`);
                 }
             }
 
-            // 3. Fallback 2: Si aún no hay info, buscar en la Web (Google/Amazon)
+            // 3. Fallback 2: Si aún no hay info, buscar en Web (Google/Amazon)
             if (!productInfo && barcode && barcode !== 'unknown') {
-                console.log('⚠️ No identificado por OFF ni IA. Intentando búsqueda Web...');
+                console.log('⚠️ Intentando búsqueda Web como último recurso...');
 
                 const fallbackResults = await serpApiService.searchAllPlatforms(barcode);
 
@@ -79,11 +92,13 @@ class ProductAggregatorService {
                     productInfo = {
                         id: barcode,
                         barcode: barcode,
-                        name: bestMatch.name,
+                        name: bestMatch.name || bestMatch.title || 'Producto Web',
                         brand: bestMatch.platform || 'Web Search',
-                        imageUrl: bestMatch.imageUrl,
-                        source: 'Web Search Fallback'
+                        category: 'General',
+                        imageUrl: bestMatch.imageUrl || bestMatch.image || null,
+                        source: 'Web Search'
                     };
+                    console.log(`✅ Producto encontrado en Web: ${productInfo.name}`);
                 } else {
                     // Intento final con Amazon Scraper directo
                     try {
@@ -93,11 +108,13 @@ class ProductAggregatorService {
                             productInfo = {
                                 id: barcode,
                                 barcode: barcode,
-                                name: bestMatch.name,
+                                name: bestMatch.name || bestMatch.title || 'Producto Amazon',
                                 brand: 'Amazon',
-                                imageUrl: bestMatch.imageUrl,
-                                source: 'Amazon Fallback'
+                                category: 'General',
+                                imageUrl: bestMatch.imageUrl || bestMatch.image || null,
+                                source: 'Amazon'
                             };
+                            console.log(`✅ Producto encontrado en Amazon: ${productInfo.name}`);
                         }
                     } catch (e) {
                         console.error('❌ Amazon Fallback falló:', e.message);
@@ -105,9 +122,9 @@ class ProductAggregatorService {
                 }
             }
 
-            // Error final si después de todos los intentos no hay nada
+            // Error final si no se encontró nada
             if (!productInfo) {
-                throw new Error('No se pudo identificar el producto con ninguna herramienta disponible.');
+                throw new Error('Producto no encontrado. Intenta con una imagen más clara o verifica el código de barras.');
             }
 
             console.log(`📦 Producto identificado: ${productInfo.name} vía ${productInfo.source}`);
@@ -115,16 +132,25 @@ class ProductAggregatorService {
             // 4. Buscar precios usando el nombre identificado
             const priceResults = await this.searchPricesByName(productInfo.name);
 
-            // 5. Guardar historial si hay usuario (No bloquea la respuesta)
+            // 5. Actualizar imagen del producto si no tiene y hay precios con imágenes
+            if (!productInfo.imageUrl && priceResults && priceResults.length > 0) {
+                const firstWithImage = priceResults.find(p => p.imageUrl || p.image);
+                if (firstWithImage) {
+                    productInfo.imageUrl = firstWithImage.imageUrl || firstWithImage.image;
+                }
+            }
+
+            // 6. Guardar historial si hay usuario (No bloquea la respuesta)
             if (userId) {
-                historyService.addSearchHistory(userId, productInfo, barcode).catch(e =>
+                historyService.addSearchHistory(userId, productInfo, productInfo.barcode).catch(e =>
                     console.error('⚠️ Error guardando historial:', e.message)
                 );
             }
 
+            // ✅ RESPUESTA ESTANDARIZADA PARA FLUTTER
             return {
                 product: productInfo,
-                prices: priceResults,
+                prices: priceResults || [],
             };
 
         } catch (error) {
@@ -141,9 +167,8 @@ class ProductAggregatorService {
             console.log('📸 AI: Analizando imagen...');
             const aiResult = await aiService.identifyProduct(imageBase64);
 
-            if (!aiResult || !aiResult.name) {
-                console.warn('⚠️ La IA no pudo identificar el producto');
-                return { product: null, prices: [] };
+            if (!aiResult || !aiResult.success || !aiResult.name) {
+                throw new Error('La IA no pudo identificar el producto. Intenta con mejor iluminación.');
             }
 
             console.log(`🔍 AI: Identificado como "${aiResult.name}"`);
@@ -151,11 +176,14 @@ class ProductAggregatorService {
             const prices = await this.searchPricesByName(aiResult.name);
 
             const productData = {
+                id: aiResult.id || `AI-${Date.now()}`,
                 name: aiResult.name,
                 brand: aiResult.brand || 'Identificado por IA',
                 barcode: aiResult.barcode || `AI-${Date.now()}`,
+                category: aiResult.category || 'General',
                 source: 'Gemini AI',
-                imageUrl: aiResult.imageUrl || (prices.length > 0 ? prices[0].imageUrl : null)
+                imageUrl: aiResult.imageUrl || (prices.length > 0 ? (prices[0].imageUrl || prices[0].image) : null),
+                confidence: aiResult.confidence
             };
 
             // Guardar historial si hay usuario
@@ -165,9 +193,10 @@ class ProductAggregatorService {
                 );
             }
 
+            // ✅ RESPUESTA ESTANDARIZADA PARA FLUTTER
             return {
                 product: productData,
-                prices: prices,
+                prices: prices || [],
             };
         } catch (error) {
             console.error('❌ AI Search Error:', error.message);
@@ -215,7 +244,7 @@ class ProductAggregatorService {
         let uniquePrices = this.removeDuplicates(allPrices);
 
         // 2. Ordenar por precio (Menor a Mayor)
-        uniquePrices.sort((a, b) => a.price - b.price);
+        uniquePrices.sort((a, b) => (a.price || 999999) - (b.price || 999999));
 
         // 3. Validar y construir URLs finales
         const validatedPrices = this.validateUrls(uniquePrices, productName);
@@ -237,7 +266,10 @@ class ProductAggregatorService {
         const uniqueMap = new Map();
         products.forEach(item => {
             // Usamos la URL como llave primaria, si no existe usamos plataforma + nombre
-            const key = item.url && item.url !== 'null' ? item.url : `${item.platform}-${item.name.toLowerCase().trim()}`;
+            const key = item.url && item.url !== 'null'
+                ? item.url
+                : `${item.platform || 'unknown'}-${(item.name || item.title || '').toLowerCase().trim()}`;
+
             if (!uniqueMap.has(key)) {
                 uniqueMap.set(key, item);
             }
@@ -303,7 +335,10 @@ class ProductAggregatorService {
         // Ejecutar todos los scrapers simultáneamente
         const promises = stores.map(store =>
             store.scraper.searchProducts(productName)
-                .then(products => (products || []).map(p => ({ ...p, platform: store.name })))
+                .then(products => (products || []).map(p => ({
+                    ...p,
+                    platform: p.platform || store.name
+                })))
                 .catch(error => {
                     console.error(`   ❌ Error en ${store.name}: ${error.message}`);
                     return [];

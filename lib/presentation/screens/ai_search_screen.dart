@@ -31,6 +31,7 @@ class _AISearchScreenState extends State<AISearchScreen> {
   String? _errorMessage;
   Map<String, dynamic>? _result;
   String? _productBarcode;
+  String? _productName;
   bool _isFavorite = false;
   bool _isTogglingFavorite = false;
 
@@ -41,41 +42,52 @@ class _AISearchScreenState extends State<AISearchScreen> {
     _identifyProduct();
   }
 
-  Future<void> _identifyProduct() async {
-    try {
-      final file = File(widget.imagePath);
-      if (!await file.exists()) throw Exception("Imagen no encontrada");
-      
-      final imageBytes = await file.readAsBytes();
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+Future<void> _identifyProduct() async {
+  try {
+    final file = File(widget.imagePath);
+    if (!await file.exists()) throw Exception("Imagen no encontrada");
+    
+    final imageBytes = await file.readAsBytes();
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
 
-      // ✅ Llamada al servicio Dual que configuramos previamente
-      final result = await _aiService.searchBarcodeWithImageFallback(
-        barcode: _productBarcode ?? 'unknown',
-        imageBytes: imageBytes,
-        token: token,
-      );
+    // ✅ Llamada al servicio
+    final result = await _aiService.searchBarcodeWithImageFallback(
+      barcode: _productBarcode ?? 'unknown',
+      imageBytes: imageBytes,
+      token: token,
+    );
 
-      if (mounted) {
-        setState(() {
-          _result = result;
-          // Actualizamos el barcode con el que la IA encontró (si antes era unknown)
-          _productBarcode = result['barcode']; 
-          _isLoading = false;
-        });
+    if (mounted) {
+      setState(() {
+        _result = result;
+        
+        // ✅ Extraer datos correctamente según backend
+        // Backend retorna: {product: {...}, prices: [...]}
+        final productData = result['product'];
+        
+        _productBarcode = productData['barcode'] ?? _productBarcode;
+        _productName = productData['name'] ?? 'Producto Identificado';
+        
+        _isLoading = false;
+      });
 
-        if (_productBarcode != null) _checkFavoriteStatus();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = e.toString().replaceAll('Exception:', '').trim();
-          _isLoading = false;
-        });
+      if (_productBarcode != null && _productBarcode != 'unknown') {
+        _checkFavoriteStatus();
       }
     }
+  } catch (e) {
+    if (mounted) {
+      setState(() {
+        _errorMessage = e.toString()
+            .replaceAll('Exception:', '')
+            .replaceAll('Error:', '')
+            .trim();
+        _isLoading = false;
+      });
+    }
   }
+}
 
   void _checkFavoriteStatus() {
     if (_productBarcode == null || _productBarcode == 'unknown') return;
@@ -96,10 +108,9 @@ class _AISearchScreenState extends State<AISearchScreen> {
 
     setState(() => _isTogglingFavorite = true);
 
-    final data = _result;
-    final prices = (data?['searchResults'] as List?) ?? [];
-    // Usamos la imagen del primer resultado de precio como imagen del producto
-    final imageUrl = prices.isNotEmpty ? (prices[0]['image'] ?? '') : '';
+    // ✅ Extraer imagen correctamente
+    final prices = (_result?['prices'] as List?) ?? [];
+    final imageUrl = prices.isNotEmpty ? (prices[0]['imageUrl'] ?? prices[0]['image'] ?? '') : '';
 
     if (_isFavorite) {
       context.read<FavoriteBloc>().add(RemoveFavorite(_productBarcode!));
@@ -107,7 +118,7 @@ class _AISearchScreenState extends State<AISearchScreen> {
       context.read<FavoriteBloc>().add(
         AddFavorite(
           barcode: _productBarcode!,
-          name: data?['identifiedProduct'] ?? 'Producto Identificado',
+          name: _productName ?? 'Producto',
           imageUrl: imageUrl,
         ),
       );
@@ -167,7 +178,6 @@ class _AISearchScreenState extends State<AISearchScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Previsualización de la foto tomada
           Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(20),
@@ -189,13 +199,15 @@ class _AISearchScreenState extends State<AISearchScreen> {
   }
 
   Widget _buildResultView() {
-    final data = _result!;
-    final prices = (data['searchResults'] as List?) ?? [];
+    if (_result == null) return const SizedBox();
+    
+    // ✅ Extraer datos correctamente según la estructura del backend
+    final prices = (_result!['prices'] as List?) ?? [];
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _buildProductHeader(data['identifiedProduct'] ?? 'Producto'),
+        _buildProductHeader(_productName ?? 'Producto'),
         const SizedBox(height: 24),
         const Row(
           children: [
@@ -261,11 +273,11 @@ class _AISearchScreenState extends State<AISearchScreen> {
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              // Imagen del producto en la tienda
+              // ✅ Manejar ambos formatos de imagen (imageUrl o image)
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: Image.network(
-                  price['image'] ?? '',
+                  price['imageUrl'] ?? price['image'] ?? '',
                   width: 60, height: 60,
                   fit: BoxFit.contain,
                   errorBuilder: (_, __, ___) => const Icon(Icons.inventory, size: 40),
@@ -276,10 +288,10 @@ class _AISearchScreenState extends State<AISearchScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(price['platform']?.toUpperCase() ?? 'TIENDA', 
+                    Text((price['platform'] ?? price['store'] ?? 'TIENDA').toUpperCase(), 
                       style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
                     const SizedBox(height: 2),
-                    Text(price['title'] ?? 'Ver en tienda',
+                    Text(price['title'] ?? price['name'] ?? 'Ver en tienda',
                       maxLines: 2, overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
                   ],
@@ -292,7 +304,7 @@ class _AISearchScreenState extends State<AISearchScreen> {
                   if (hasDiscount)
                     Text('S/ ${price['oldPrice']}', 
                       style: const TextStyle(fontSize: 11, decoration: TextDecoration.lineThrough, color: Colors.red)),
-                  Text('S/ ${price['price']}', 
+                  Text('S/ ${price['price'] ?? '0.00'}', 
                     style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
                 ],
               ),
@@ -320,23 +332,27 @@ class _AISearchScreenState extends State<AISearchScreen> {
 
   Widget _buildErrorView() {
     return Center(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.cloud_off, size: 80, color: Colors.redAccent),
-          const SizedBox(height: 20),
-          Text(_errorMessage ?? 'Error al procesar', 
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 30),
-          ElevatedButton.icon(
-            onPressed: () => context.pop(), 
-            icon: const Icon(Icons.arrow_back),
-            label: const Text('Intentar con otra foto'),
-            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
-          )
-        ],
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.cloud_off, size: 80, color: Colors.redAccent),
+            const SizedBox(height: 20),
+            Text(_errorMessage ?? 'Error al procesar', 
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+            const SizedBox(height: 30),
+            ElevatedButton.icon(
+              onPressed: () => context.pop(), 
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Intentar con otra foto'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)
+              ),
+            )
+          ],
+        ),
       ),
     );
   }

@@ -13,10 +13,8 @@ class SearchProvider {
     final dio = Dio(
       BaseOptions(
         baseUrl: AppConstants.backendUrl,
-        baseUrl: AppConstants.backendUrl,
-        // Usamos constantes globales aumentadas
         connectTimeout: AppConstants.connectionTimeout,
-        receiveTimeout: AppConstants.receiveTimeout, 
+        receiveTimeout: AppConstants.receiveTimeout,
         sendTimeout: AppConstants.connectionTimeout,
         headers: {
           'Content-Type': 'application/json',
@@ -27,88 +25,71 @@ class SearchProvider {
 
     dio.interceptors.add(
       LogInterceptor(
-        requestBody: true,
+        requestBody: false, // ✅ No loguear imágenes en base64
         responseBody: true,
-        logPrint: (obj) => print('🔍 SEARCH: $obj'),
+        error: true,
+        logPrint: (obj) => print('🔍 SEARCH_API: $obj'),
       ),
     );
 
     return dio;
   }
 
-  // Helper para obtener headers con Token
+  /// Obtiene headers con token JWT si existe
   Future<Map<String, String>> _getHeaders() async {
-    final headers = <String, String>{
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString(AppConstants.tokenKey);
+    
+    return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString(AppConstants.tokenKey); 
-      
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
-    } catch (e) {
-      print('⚠️ Error obteniendo token: $e');
-    }
-
-    return headers;
   }
 
   // =========================================================
-  // ✅ 1. BÚSQUEDA POR TEXTO (Nuevo método agregado)
+  // ✅ BÚSQUEDA POR NOMBRE (Texto)
   // =========================================================
   Future<List<PriceResult>> searchByName(String query) async {
     try {
-      final headers = await _getHeaders();
-
-      // Llamada al endpoint: /api/products/search?query=Coca
       final response = await _dio.get(
         '/products/search',
         queryParameters: {'query': query},
-        options: Options(headers: headers),
+        options: Options(headers: await _getHeaders()),
       );
 
       if (response.data != null && response.data['success'] == true) {
-        final List<dynamic> data = response.data['data'];
-        
-        // Mapeamos la lista de resultados del backend a modelos de Flutter
+        final List data = response.data['data'] ?? [];
         return data.map((json) => PriceResult.fromJson(json)).toList();
       }
       
-      return []; // Si no hay datos, retornar lista vacía
+      return [];
     } on DioException catch (e) {
       throw _handleError(e);
     }
   }
 
   // =========================================================
-  // ✅ 2. BÚSQUEDA POR BARCODE OPTIMIZADA (Full)
+  // ✅ BÚSQUEDA COMPLETA POR BARCODE (Producto + Precios)
   // =========================================================
   Future<Map<String, dynamic>> searchFullProduct(String barcode) async {
     try {
-      final headers = await _getHeaders();
-
       final response = await _dio.get(
         '/products/barcode/$barcode',
-        options: Options(headers: headers),
+        options: Options(headers: await _getHeaders()),
       );
       
       if (response.data != null && response.data['success'] == true) {
         final data = response.data['data'];
         
-        Product? product;
-        if (data['product'] != null) {
-          product = Product.fromJson(data['product']);
+        // ✅ Validación de datos antes de mapear
+        if (data['product'] == null) {
+          throw Exception('Producto no encontrado');
         }
 
-        List<PriceResult> prices = [];
-        if (data['prices'] != null) {
-          final List<dynamic> pricesJson = data['prices'];
-          prices = pricesJson.map((json) => PriceResult.fromJson(json)).toList();
-        }
+        final product = Product.fromJson(data['product']);
+        final List pricesJson = data['prices'] ?? [];
+        final prices = pricesJson.map((j) => PriceResult.fromJson(j)).toList();
 
         return {
           'product': product,
@@ -123,68 +104,65 @@ class SearchProvider {
   }
 
   // =========================================================
-  // ⚠️ MÉTODOS LEGACY (Mantenidos por compatibilidad)
+  // ⚠️ MÉTODOS LEGACY (Compatibilidad - Opcional)
   // =========================================================
   
+  /// Retorna solo el producto (sin precios)
   Future<Product> searchByBarcode(String barcode) async {
     try {
-      final headers = await _getHeaders();
-      final response = await _dio.get(
-        '/products/barcode/$barcode',
-        options: Options(headers: headers),
-      );
-      
-      if (response.data != null && response.data['success'] == true) {
-        final productData = response.data['data']['product'];
-        if (productData == null) throw Exception('Producto no encontrado');
-        return Product.fromJson(productData);
-      }
-      throw Exception('Producto no encontrado');
-    } on DioException catch (e) {
-      throw _handleError(e);
+      final result = await searchFullProduct(barcode);
+      return result['product'] as Product;
+    } catch (e) {
+      rethrow;
     }
   }
 
+  /// Retorna solo los precios (sin producto)
   Future<List<PriceResult>> searchPrices(String barcode) async {
     try {
-      final headers = await _getHeaders();
-      final response = await _dio.get(
-        '/products/barcode/$barcode',
-        options: Options(headers: headers),
-      );
-      
-      if (response.data != null && response.data['success'] == true) {
-        final pricesData = response.data['data']['prices'];
-        if (pricesData == null) return [];
-        
-        final List<dynamic> pricesJson = pricesData as List;
-        return pricesJson.map((json) => PriceResult.fromJson(json)).toList();
-      }
-      return [];
-    } on DioException catch (e) {
-      throw _handleError(e);
+      final result = await searchFullProduct(barcode);
+      return result['prices'] as List<PriceResult>;
+    } catch (e) {
+      rethrow;
     }
   }
 
   // =========================================================
-  // MANEJO DE ERRORES
+  // MANEJO DE ERRORES MEJORADO
   // =========================================================
   Exception _handleError(DioException e) {
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
-        return Exception('Tiempo de conexión agotado');
+        return Exception('Tiempo de conexión agotado. Verifica tu internet.');
+      
       case DioExceptionType.receiveTimeout:
-        return Exception('El servidor está tardando en buscar precios (Scraping en curso). Inténtalo de nuevo.');
+        return Exception('El servidor está demorando (Scraping en curso). Intenta nuevamente en 10 segundos.');
+      
       case DioExceptionType.badResponse:
         final statusCode = e.response?.statusCode;
-        if (statusCode == 404) return Exception('Producto no encontrado');
-        if (statusCode == 401) return Exception('Sesión expirada');
-        return Exception('Error del servidor: $statusCode');
+        final errorMsg = e.response?.data?['error'];
+        
+        if (statusCode == 404) {
+          return Exception(errorMsg ?? 'Producto no encontrado');
+        }
+        if (statusCode == 401) {
+          return Exception('Sesión expirada. Inicia sesión nuevamente.');
+        }
+        if (statusCode == 422) {
+          return Exception(errorMsg ?? 'La IA no pudo reconocer el producto');
+        }
+        
+        return Exception(errorMsg ?? 'Error del servidor ($statusCode)');
+      
       case DioExceptionType.connectionError:
-        return Exception('Error de conexión. Verifica tu internet.');
+        return Exception('Sin conexión a internet. Verifica tu red.');
+      
+      case DioExceptionType.cancel:
+        return Exception('Búsqueda cancelada');
+      
       default:
-        return Exception('Error: ${e.message}');
+        return Exception(e.response?.data?['error'] ?? 'Error desconocido: ${e.message}');
     }
   }
 }
