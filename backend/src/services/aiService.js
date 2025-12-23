@@ -33,16 +33,14 @@ class AIService {
             // 2. Limpieza del string base64
             const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
-            // 3. ✅ CORRECCIÓN: Usar el modelo correcto
-            // Los modelos disponibles son:
-            // - gemini-1.5-pro (más preciso pero más lento y caro)
-            // - gemini-1.5-flash-latest (rápido y económico)
-            // - gemini-pro-vision (versión antigua)
+            // 3. ✅ CORRECCIÓN CRÍTICA: Modelo y tokens actualizados
             const model = this.genAI.getGenerativeModel({
-                model: 'gemini-flash-latest', // ✅ Cambio crítico
+                model: 'gemini-1.5-flash-latest', // ✅ Modelo más reciente
                 generationConfig: {
                     temperature: 0.1,
-                    maxOutputTokens: 500,
+                    maxOutputTokens: 2000, // ✅ AUMENTADO de 500 a 2000
+                    topP: 0.95,
+                    topK: 40,
                 }
             });
 
@@ -81,7 +79,7 @@ Responde ÚNICAMENTE con el JSON, sin markdown ni explicaciones.`;
             const response = await result.response;
             const text = response.text();
 
-            console.log('🤖 AI Respuesta Raw:', text.substring(0, 300));
+            console.log('🤖 AI Respuesta Raw:', text.substring(0, 500)); // ✅ Aumentado para debug
 
             // 6. Parseo seguro del JSON
             let aiData;
@@ -113,7 +111,8 @@ Responde ÚNICAMENTE con el JSON, sin markdown ni explicaciones.`;
                             success: false,
                             name: null,
                             error: 'La IA no devolvió un formato JSON válido',
-                            confidence: 'low'
+                            confidence: 'low',
+                            rawResponse: text.substring(0, 200) // ✅ Para debug
                         };
                     }
                 } else {
@@ -123,7 +122,8 @@ Responde ÚNICAMENTE con el JSON, sin markdown ni explicaciones.`;
                         success: false,
                         name: null,
                         error: 'La IA no devolvió un formato JSON válido',
-                        confidence: 'low'
+                        confidence: 'low',
+                        rawResponse: text.substring(0, 200) // ✅ Para debug
                     };
                 }
             }
