@@ -35,7 +35,7 @@ class AIService {
 
             // 3. ✅ CORRECCIÓN CRÍTICA: Modelo y tokens actualizados
             const model = this.genAI.getGenerativeModel({
-                model: 'gemini-1.5-flash-latest', // ✅ Modelo más reciente
+                model: 'gemini-flash-latest', // ✅ Modelo más reciente
                 generationConfig: {
                     temperature: 0.1,
                     maxOutputTokens: 2000, // ✅ AUMENTADO de 500 a 2000
