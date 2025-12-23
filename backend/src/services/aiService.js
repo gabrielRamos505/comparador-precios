@@ -39,7 +39,7 @@ class AIService {
             // - gemini-1.5-flash-latest (rápido y económico)
             // - gemini-pro-vision (versión antigua)
             const model = this.genAI.getGenerativeModel({
-                model: 'gemini-1.5-flash-latest', // ✅ Cambio crítico
+                model: 'gemini-flash-latest', // ✅ Cambio crítico
                 generationConfig: {
                     temperature: 0.1,
                     maxOutputTokens: 500,
