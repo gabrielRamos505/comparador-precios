@@ -7,6 +7,8 @@ const plazaVeaScraper = require('./scrapers/plazaVeaScraper');
 const wongScraper = require('./scrapers/wongScraper');
 const metroScraper = require('./scrapers/metroScraper');
 const tottusScraper = require('./scrapers/tottusScraper');
+const amazonScraper = require('./amazonScraperService'); // Movido arriba para consistencia
+
 const historyService = require('./historyService');
 const aiService = require('./aiService');
 
@@ -16,61 +18,59 @@ class ProductAggregatorService {
     // BÚSQUEDA POR NOMBRE (Método público principal)
     // ---------------------------------------------------------
     async searchByName(productName, options = {}) {
-        console.log(`🔍 SearchByName called for: "${productName}"`);
+        console.log(`🔍 SearchByName llamado para: "${productName}"`);
 
         try {
-            // Delegar a searchPricesByName que tiene toda la lógica
+            // Delegar a searchPricesByName que tiene toda la lógica de agregación
             const prices = await this.searchPricesByName(productName);
 
             // Retornamos directamente el array para compatibilidad con Flutter (List<dynamic>)
-            return prices;
+            return prices || [];
         } catch (error) {
-            console.error(`❌ Error in searchByName: ${error.message}`);
-            return {
-                success: false,
-                productName: productName,
-                totalResults: 0,
-                prices: [],
-                error: error.message
-            };
+            console.error(`❌ Error en searchByName: ${error.message}`);
+            return []; // Retorno consistente para evitar crashes en el App
         }
     }
 
     // ---------------------------------------------------------
-    // BÚSQUEDA POR CÓDIGO DE BARRAS (CON FALLBACK DE IA)
+    // BÚSQUEDA POR CÓDIGO DE BARRAS (CON FALLBACK DE IA MEJORADO)
     // ---------------------------------------------------------
     async searchByBarcode(barcode, userId = null, imageBase64 = null) {
-        console.log(`🔍 Searching for barcode: ${barcode}`);
+        console.log(`🔍 Buscando barcode: ${barcode}`);
 
         try {
             let productInfo = null;
 
             // 1. Intentar con OpenFoodFacts (Alimentos)
-            // Solo si el barcode no parece ser un ID temporal de IA
-            if (barcode && !barcode.startsWith('AI-')) {
-                productInfo = await openFoodFactsService.getProductByBarcode(barcode);
+            // Solo si el barcode es válido y no es un ID temporal
+            if (barcode && barcode !== 'unknown' && !barcode.startsWith('AI-')) {
+                try {
+                    productInfo = await openFoodFactsService.getProductByBarcode(barcode);
+                } catch (e) {
+                    console.log('⚠️ OpenFoodFacts no disponible o producto no encontrado.');
+                }
             }
 
             // 2. Fallback 1: Si no está en OFF, intentar con IA (Si hay imagen disponible)
             if (!productInfo && imageBase64) {
-                console.log('   🔄 OFF falló. Intentando identificar con IA Gemini...');
+                console.log('🔄 Barcode no encontrado en base de datos. Iniciando IA Gemini...');
                 const aiResult = await aiService.identifyProduct(imageBase64);
 
                 if (aiResult && aiResult.name) {
                     productInfo = {
-                        id: aiResult.id,
+                        id: aiResult.id || `AI-${Date.now()}`,
                         barcode: barcode,
                         name: aiResult.name,
-                        brand: aiResult.brand,
+                        brand: aiResult.brand || 'Identificado por IA',
                         imageUrl: aiResult.imageUrl,
                         source: 'IA Vision Fallback'
                     };
                 }
             }
 
-            // 3. Fallback 2: Si aún no hay info, buscar en Google/Amazon (Objetos)
-            if (!productInfo) {
-                console.log('   ⚠️ No identificado por OFF ni IA. Intentando Fallback Web...');
+            // 3. Fallback 2: Si aún no hay info, buscar en la Web (Google/Amazon)
+            if (!productInfo && barcode && barcode !== 'unknown') {
+                console.log('⚠️ No identificado por OFF ni IA. Intentando búsqueda Web...');
 
                 const fallbackResults = await serpApiService.searchAllPlatforms(barcode);
 
@@ -80,14 +80,13 @@ class ProductAggregatorService {
                         id: barcode,
                         barcode: barcode,
                         name: bestMatch.name,
-                        brand: bestMatch.platform,
+                        brand: bestMatch.platform || 'Web Search',
                         imageUrl: bestMatch.imageUrl,
                         source: 'Web Search Fallback'
                     };
                 } else {
                     // Intento final con Amazon Scraper directo
                     try {
-                        const amazonScraper = require('./amazonScraperService');
                         const amazonResults = await amazonScraper.searchProduct(barcode);
                         if (amazonResults && amazonResults.length > 0) {
                             const bestMatch = amazonResults[0];
@@ -101,24 +100,25 @@ class ProductAggregatorService {
                             };
                         }
                     } catch (e) {
-                        console.error('   ❌ Amazon Fallback falló');
+                        console.error('❌ Amazon Fallback falló:', e.message);
                     }
                 }
             }
 
+            // Error final si después de todos los intentos no hay nada
             if (!productInfo) {
-                throw new Error('No se pudo identificar el producto con ninguna de las herramientas (OFF, IA, Web).');
+                throw new Error('No se pudo identificar el producto con ninguna herramienta disponible.');
             }
 
-            console.log(`📦 Product identified: ${productInfo.name} via ${productInfo.source}`);
+            console.log(`📦 Producto identificado: ${productInfo.name} vía ${productInfo.source}`);
 
             // 4. Buscar precios usando el nombre identificado
             const priceResults = await this.searchPricesByName(productInfo.name);
 
-            // 5. Guardar historial si hay usuario
+            // 5. Guardar historial si hay usuario (No bloquea la respuesta)
             if (userId) {
                 historyService.addSearchHistory(userId, productInfo, barcode).catch(e =>
-                    console.error('   ⚠️ Error guardando historial:', e.message)
+                    console.error('⚠️ Error guardando historial:', e.message)
                 );
             }
 
@@ -142,7 +142,7 @@ class ProductAggregatorService {
             const aiResult = await aiService.identifyProduct(imageBase64);
 
             if (!aiResult || !aiResult.name) {
-                console.warn('⚠️ AI could not identify product');
+                console.warn('⚠️ La IA no pudo identificar el producto');
                 return { product: null, prices: [] };
             }
 
@@ -150,14 +150,23 @@ class ProductAggregatorService {
 
             const prices = await this.searchPricesByName(aiResult.name);
 
+            const productData = {
+                name: aiResult.name,
+                brand: aiResult.brand || 'Identificado por IA',
+                barcode: aiResult.barcode || `AI-${Date.now()}`,
+                source: 'Gemini AI',
+                imageUrl: aiResult.imageUrl || (prices.length > 0 ? prices[0].imageUrl : null)
+            };
+
+            // Guardar historial si hay usuario
+            if (userId) {
+                historyService.addSearchHistory(userId, productData, productData.barcode).catch(e =>
+                    console.error('⚠️ Error guardando historial de imagen:', e.message)
+                );
+            }
+
             return {
-                product: {
-                    name: aiResult.name,
-                    brand: aiResult.brand,
-                    barcode: aiResult.barcode,
-                    source: aiResult.source,
-                    imageUrl: aiResult.imageUrl || null
-                },
+                product: productData,
                 prices: prices,
             };
         } catch (error) {
@@ -167,64 +176,68 @@ class ProductAggregatorService {
     }
 
     // ---------------------------------------------------------
-    // BÚSQUEDA POR NOMBRE (LÓGICA CENTRAL INTERNA)
+    // BÚSQUEDA POR NOMBRE (LÓGICA CENTRAL DE PRECIOS)
     // ---------------------------------------------------------
     async searchPricesByName(productName) {
-        const allPrices = [];
-        const errors = [];
+        if (!productName) return [];
 
         console.log(`\n${'='.repeat(60)}`);
-        console.log(`🔍 INICIANDO BÚSQUEDA AGREGADA: "${productName}"`);
+        console.log(`🚀 INICIANDO BÚSQUEDA AGREGADA: "${productName}"`);
         console.log(`${'='.repeat(60)}\n`);
 
+        // Ejecutar todas las fuentes en paralelo para velocidad máxima
         const results = await Promise.allSettled([
             this.searchMercadoLibre(productName),
             this.searchSerpAPI(productName),
             this.searchPeruvianStores(productName)
         ]);
 
-        results.forEach((result, index) => {
-            const sources = ['Mercado Libre', 'SerpAPI', 'Tiendas Peruanas'];
-            const sourceName = sources[index];
+        const allPrices = [];
+        const errors = [];
+        const sources = ['Mercado Libre', 'SerpAPI', 'Supermercados Perú'];
 
+        results.forEach((result, index) => {
             if (result.status === 'fulfilled') {
                 if (result.value && result.value.length > 0) {
                     allPrices.push(...result.value);
                 }
             } else {
-                errors.push({ platform: sourceName, error: result.reason.message });
+                errors.push({ platform: sources[index], error: result.reason.message });
             }
         });
 
         if (errors.length > 0) {
-            console.log('\n⚠️ Reporte de errores en servicios:');
+            console.log('⚠️ Errores en algunas fuentes:');
             errors.forEach(err => console.log(`   - ${err.platform}: ${err.error}`));
         }
 
-        allPrices.sort((a, b) => a.price - b.price);
-        const uniquePrices = this.removeDuplicates(allPrices);
+        // 1. Eliminar duplicados por URL o Nombre
+        let uniquePrices = this.removeDuplicates(allPrices);
 
-        // ✅ VALIDAR URLs
+        // 2. Ordenar por precio (Menor a Mayor)
+        uniquePrices.sort((a, b) => a.price - b.price);
+
+        // 3. Validar y construir URLs finales
         const validatedPrices = this.validateUrls(uniquePrices, productName);
 
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`💰 RESULTADO FINAL: ${validatedPrices.length} opciones encontradas`);
-
+        console.log(`\n💰 RESULTADO: ${validatedPrices.length} opciones encontradas.`);
         if (validatedPrices.length > 0) {
-            const minPrice = validatedPrices[0].price;
-            const maxPrice = validatedPrices[validatedPrices.length - 1].price;
-            console.log(`💵 Mejor Precio: S/ ${minPrice.toFixed(2)}`);
-            console.log(`📈 Precio Máximo: S/ ${maxPrice.toFixed(2)}`);
+            console.log(`💵 Precio Mínimo: S/ ${validatedPrices[0].price.toFixed(2)}`);
         }
         console.log(`${'='.repeat(60)}\n`);
 
         return validatedPrices;
     }
 
+    // ---------------------------------------------------------
+    // MÉTODOS DE SOPORTE (LIMPIEZA Y VALIDACIÓN)
+    // ---------------------------------------------------------
+
     removeDuplicates(products) {
         const uniqueMap = new Map();
         products.forEach(item => {
-            const key = item.url ? item.url : `${item.platform}-${item.name.toLowerCase().trim()}`;
+            // Usamos la URL como llave primaria, si no existe usamos plataforma + nombre
+            const key = item.url && item.url !== 'null' ? item.url : `${item.platform}-${item.name.toLowerCase().trim()}`;
             if (!uniqueMap.has(key)) {
                 uniqueMap.set(key, item);
             }
@@ -234,6 +247,7 @@ class ProductAggregatorService {
 
     validateUrls(products, searchQuery) {
         return products.map(product => {
+            // Si la URL es inválida, generamos una búsqueda directa en la tienda
             if (!product.url ||
                 product.url === 'null' ||
                 product.url === 'undefined' ||
@@ -257,30 +271,28 @@ class ProductAggregatorService {
 
     async searchMercadoLibre(productName) {
         try {
-            console.log(`🛒 [1/3] Consultando Mercado Libre...`);
-            const results = await mercadoLibreService.searchByName(productName);
-            return results || [];
+            console.log(`🛒 [ML] Consultando Mercado Libre Perú...`);
+            return await mercadoLibreService.searchByName(productName) || [];
         } catch (error) {
-            console.error(`   ❌ ML Error: ${error.message}`);
+            console.error(`❌ ML Error: ${error.message}`);
             return [];
         }
     }
 
     async searchSerpAPI(productName) {
         try {
-            console.log(`🌐 [2/3] Consultando Google Shopping...`);
-            const results = await serpApiService.searchAllPlatforms(productName);
-            return results || [];
+            console.log(`🌐 [SerpAPI] Consultando Google Shopping...`);
+            return await serpApiService.searchAllPlatforms(productName) || [];
         } catch (error) {
-            console.error(`   ❌ SerpAPI Error: ${error.message}`);
+            console.error(`❌ SerpAPI Error: ${error.message}`);
             return [];
         }
     }
 
     async searchPeruvianStores(productName) {
-        console.log(`🇵🇪 [3/3] Iniciando scraping de supermercados...`);
+        console.log(`🇵🇪 [Scrapers] Consultando supermercados en paralelo...`);
         const startTime = Date.now();
-        const results = [];
+
         const stores = [
             { name: 'Metro', scraper: metroScraper },
             { name: 'Plaza Vea', scraper: plazaVeaScraper },
@@ -288,37 +300,23 @@ class ProductAggregatorService {
             { name: 'Tottus', scraper: tottusScraper }
         ];
 
-        try {
-            const promises = stores.map(store =>
-                store.scraper.searchProducts(productName)
-                    .then(products => ({
-                        status: 'fulfilled',
-                        store: store.name,
-                        products: products
-                    }))
-                    .catch(error => ({
-                        status: 'rejected',
-                        store: store.name,
-                        error: error.message
-                    }))
-            );
+        // Ejecutar todos los scrapers simultáneamente
+        const promises = stores.map(store =>
+            store.scraper.searchProducts(productName)
+                .then(products => (products || []).map(p => ({ ...p, platform: store.name })))
+                .catch(error => {
+                    console.error(`   ❌ Error en ${store.name}: ${error.message}`);
+                    return [];
+                })
+        );
 
-            const outcomes = await Promise.all(promises);
-            outcomes.forEach(outcome => {
-                if (outcome.status === 'fulfilled') {
-                    if (outcome.products && outcome.products.length > 0) {
-                        console.log(`      ✅ ${outcome.store}: ${outcome.products.length} encontrados`);
-                        results.push(...outcome.products);
-                    }
-                }
-            });
-        } catch (error) {
-            console.error('❌ Error crítico en scraping paralelo:', error);
-        }
+        const outcomes = await Promise.all(promises);
+        const combinedResults = outcomes.flat();
 
         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-        console.log(`   ⏱️ Scraping finalizado en ${duration}s. Total items: ${results.length}`);
-        return results;
+        console.log(`⏱️ Scraping completado en ${duration}s. Items: ${combinedResults.length}`);
+
+        return combinedResults;
     }
 }
 

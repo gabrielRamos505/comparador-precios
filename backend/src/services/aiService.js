@@ -8,41 +8,42 @@ class AIService {
         }
 
         this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        console.log('✅ Gemini AI Service initialized');
+        console.log('✅ Gemini AI Service iniciado correctamente');
     }
 
+    /**
+     * Identifica un producto a partir de una imagen en Base64 usando Gemini 1.5 Flash.
+     */
     async identifyProduct(imageBase64) {
         try {
-            console.log('🤖 AI: Analyzing image with Gemini Vision...');
+            console.log('🤖 AI: Analizando imagen con Gemini Vision (Perú Retail Mode)...');
 
-            // 1. Limpieza base64
+            // 1. Limpieza rigurosa del string base64
             const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
-            // 2. Configurar Modelo con MODO JSON
+            // 2. Configuración del modelo con MODO JSON forzado
             const model = this.genAI.getGenerativeModel({
-                model: 'gemini-1.5-flash', // Recomendado: más rápido y estable para visión
+                model: 'gemini-1.5-flash',
                 generationConfig: {
-                    responseMimeType: "application/json"
+                    responseMimeType: "application/json",
+                    temperature: 0.1, // Baja temperatura para respuestas más precisas y menos creativas
                 }
             });
 
-            // 3. Prompt optimizado
-            const prompt = `Actúa como un experto en identificación de productos retail en Perú.
-Analiza esta imagen y extrae los datos para un comparador de precios.
+            // 3. Prompt optimizado para scrapers de Perú (Plaza Vea, Metro, etc.)
+            const prompt = `Actúa como un experto en retail peruano. Analiza la imagen y extrae datos para un comparador de precios.
+            
+            Debes devolver un objeto JSON con:
+            1. "productName": Nombre comercial (Marca + Producto + Variante). Ej: "Inca Kola Sin Azúcar".
+            2. "brand": La marca principal. Ej: "Inca Kola".
+            3. "quantity": Solo el contenido neto (ej: "1.5L", "500g", "6 pack"). Si no es legible, usa null.
+            4. "category": Elige una: "Bebidas", "Abarrotes", "Limpieza", "Lácteos", "Cuidado Personal", "Tecnología".
+            5. "confidence": "high" si el producto es claro, "medium" si hay dudas, "low" si no es un producto retail.
 
-EXTRAE EXACTAMENTE ESTOS CAMPOS:
-1. "productName": Nombre corto y preciso para buscar en tiendas (Marca + Producto + Variante).
-2. "brand": La marca principal visible.
-3. "quantity": El peso o volumen visible en el empaque (ej: "500ml", "1kg", "6 pack", "3L"). Si no es visible, usa null.
-4. "category": Categoría general (Bebidas, Abarrotes, Limpieza, Tecnología, etc.).
-5. "confidence": "high", "medium" o "low".
-
-REGLAS:
-- Si ves "Inca Kola", no pongas "Coca Cola". Sé preciso.
-- Prioriza leer el contenido neto (ej: 625ml).
-- Si la imagen es borrosa o no es un producto, responde con confidence: "low".
-
-Responde ÚNICAMENTE con el objeto JSON.`;
+            REGLAS CRÍTICAS:
+            - Si es un producto de marca propia peruana (ej: Bell's, Tottus, Metro, Wong), identifícalo correctamente.
+            - No inventes sabores si no los lees.
+            - Responde exclusivamente en formato JSON.`;
 
             const imagePart = {
                 inlineData: {
@@ -51,81 +52,95 @@ Responde ÚNICAMENTE con el objeto JSON.`;
                 },
             };
 
-            // 4. Generar
+            // 4. Ejecución de la IA
             const result = await model.generateContent([prompt, imagePart]);
             const response = await result.response;
             const text = response.text();
 
-            console.log('🤖 AI Raw Response:', text);
+            console.log('🤖 AI Respuesta Raw:', text);
 
-            // 5. Parseo
+            // 5. Parseo seguro del JSON
             let aiData;
             try {
                 aiData = JSON.parse(text);
             } catch (e) {
-                console.error('❌ Error parsing JSON from AI:', e);
+                // Intento de rescate si Gemini añade texto extra
                 const jsonMatch = text.match(/\{[\s\S]*\}/);
-                if (jsonMatch) aiData = JSON.parse(jsonMatch[0]);
+                if (jsonMatch) {
+                    aiData = JSON.parse(jsonMatch[0]);
+                } else {
+                    throw new Error('La IA no devolvió un formato JSON válido');
+                }
             }
 
+            // 6. Validación de confianza
             if (!aiData || !aiData.productName || aiData.confidence === 'low') {
-                console.warn('⚠️ AI: Low confidence or no product detected');
+                console.warn('⚠️ AI: Baja confianza o producto no detectado.');
                 return {
                     success: false,
                     name: null,
-                    error: 'No se pudo identificar el producto claramente'
+                    error: 'No se pudo identificar el producto con claridad'
                 };
             }
 
-            // 6. Construir nombre completo para la búsqueda (Tu lógica original)
+            // 7. Construcción del nombre final optimizado para los scrapers de Perú
+            // Si el nombre detectado no tiene la cantidad, se la pegamos al final
             let finalSearchName = aiData.productName;
             if (aiData.quantity && !finalSearchName.toLowerCase().includes(aiData.quantity.toLowerCase())) {
                 finalSearchName = `${finalSearchName} ${aiData.quantity}`;
             }
 
-            // Generar barcode temporal (Tu lógica original)
+            // 8. Generación de ID temporal consistente (Tu lógica original mejorada)
             const timestamp = Date.now();
-            const safeName = aiData.productName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10);
+            const safeName = aiData.productName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
             const temporaryBarcode = `AI-${safeName}-${timestamp}`;
 
-            console.log(`✅ AI Identified: "${finalSearchName}" (${aiData.confidence})`);
+            console.log(`✅ AI Identificado: "${finalSearchName}" (Confianza: ${aiData.confidence})`);
 
-            // Retornamos un objeto que el Aggregator y el Controller entiendan perfectamente
             return {
                 success: true,
                 id: temporaryBarcode,
-                name: finalSearchName, // Nombre optimizado para scrapers
+                name: finalSearchName,
                 brand: aiData.brand,
                 quantity: aiData.quantity,
                 category: aiData.category,
                 confidence: aiData.confidence,
                 barcode: temporaryBarcode,
-                source: 'IA Vision',
-                imageUrl: null
+                source: 'Gemini AI Vision',
+                imageUrl: null // El Aggregator llenará esto con el primer resultado de búsqueda
             };
 
         } catch (error) {
-            console.error('❌ AI Service Error:', error.message);
+            console.error('❌ Error en AIService:', error.message);
             return {
                 success: false,
-                error: 'Error procesando la imagen con IA',
+                error: 'Error de comunicación con el servicio de IA',
                 confidence: 'low'
             };
         }
     }
 
+    /**
+     * Valida si el base64 es una imagen válida y no excede el tamaño permitido.
+     */
     validateImage(imageBase64) {
         if (!imageBase64 || typeof imageBase64 !== 'string') return false;
 
-        // El cálculo de tamaño que tienes es excelente, lo mantenemos.
-        const sizeInBytes = 4 * Math.ceil((imageBase64.length / 3)) * 0.5624896334383812;
+        // Cálculo de tamaño para Base64 (Aprox 0.75 ratio de eficiencia)
+        const sizeInBytes = (imageBase64.length * (3 / 4));
         const sizeInMB = sizeInBytes / (1024 * 1024);
 
-        if (sizeInMB > 6) {
-            console.warn(`⚠️ Imagen muy grande: ${sizeInMB.toFixed(2)}MB`);
+        if (sizeInMB > 5) { // Límite de 5MB para Gemini Flash
+            console.warn(`⚠️ Imagen rechazada por tamaño: ${sizeInMB.toFixed(2)}MB`);
             return false;
         }
-        return true;
+
+        // Verificar encabezado común de imagen
+        const validHeader = imageBase64.startsWith('data:image/') ||
+            imageBase64.startsWith('/9j/') ||
+            imageBase64.startsWith('iVBORw0KGgo');
+
+        return validHeader;
     }
 }
 

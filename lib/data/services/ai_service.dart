@@ -12,7 +12,6 @@ class AIService {
     final dio = Dio(
       BaseOptions(
         baseUrl: AppConstants.backendUrl,
-        // Usamos constantes globales aumentadas
         connectTimeout: AppConstants.connectionTimeout,
         receiveTimeout: AppConstants.receiveTimeout, 
         sendTimeout: AppConstants.connectionTimeout,
@@ -33,84 +32,55 @@ class AIService {
 
     return dio;
   }
-  /// Nuevo método: Búsqueda por Barcode con respaldo de Imagen
+
+  /// ✅ Búsqueda por Barcode con respaldo de Imagen (IDENTIFICACIÓN DUAL)
   Future<Map<String, dynamic>> searchBarcodeWithImageFallback({
     required String barcode,
     required Uint8List imageBytes,
     String? token,
   }) async {
     try {
-      print('🔍 Buscando barcode $barcode con respaldo de IA...');
-      
       final base64Image = base64Encode(imageBytes);
+      final options = token != null ? Options(headers: {'Authorization': 'Bearer $token'}) : null;
 
-      final options = token != null
-          ? Options(headers: {'Authorization': 'Bearer $token'})
-          : null;
-
-      // Llamamos al endpoint POST que creamos en el backend
       final response = await _dio.post(
-        '/products/barcode/$barcode', 
+        '/products/identify-dual', 
         data: {
-          'image': base64Image, // Enviamos la foto por si el barcode falla
+          'barcode': barcode,
+          'image': base64Image,
         },
         options: options,
       );
 
       if (response.data['success'] == true) {
-        // El backend devuelve { success: true, data: { ... } }
         return response.data['data']; 
       } else {
         throw Exception(response.data['error'] ?? 'Producto no encontrado');
       }
-
     } on DioException catch (e) {
       throw Exception(_handleDioError(e));
-    } catch (e) {
-      throw Exception('Error en búsqueda dual: $e');
     }
   }
 
   /// Identificar producto desde imagen usando Gemini Vision
-  Future<Map<String, dynamic>> identifyProduct(
-    Uint8List imageBytes, {
-    String? token, 
-  }) async {
+  Future<Map<String, dynamic>> identifyProduct(Uint8List imageBytes, {String? token}) async {
     try {
-      print('📤 Enviando imagen a API... (${(imageBytes.length / 1024).toStringAsFixed(2)} KB)');
-      
-      // Convertir imagen a Base64
       final base64Image = base64Encode(imageBytes);
+      final options = token != null ? Options(headers: {'Authorization': 'Bearer $token'}) : null;
 
-      final options = token != null
-          ? Options(headers: {'Authorization': 'Bearer $token'})
-          : null;
-
-      // ⚠️ CORRECCIÓN 1: La ruta ahora es /products/identify
       final response = await _dio.post(
         '/products/identify', 
-        data: {
-          // ⚠️ CORRECCIÓN 2: La clave debe ser 'image' para que coincida con req.body.image en el backend
-          'image': base64Image, 
-        },
+        data: { 'image': base64Image },
         options: options,
       );
 
       if (response.data['success'] == true) {
-        final data = response.data['data'];
-        print('✅ Producto identificado: ${data['identifiedProduct']}');
-        
-        // Retornamos la data completa (incluye identifiedProduct, confidence y searchResults)
-        return data; 
+        return response.data['data']; 
       } else {
         throw Exception(response.data['error'] ?? 'Error desconocido en IA');
       }
-
     } on DioException catch (e) {
       throw Exception(_handleDioError(e));
-    } catch (e) {
-      print('❌ Error general: $e');
-      throw Exception('Error al identificar producto: $e');
     }
   }
 
@@ -118,19 +88,14 @@ class AIService {
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
-        return 'Tiempo de conexión agotado. Tu internet parece lento.';
+        return 'Tiempo de conexión agotado.';
       case DioExceptionType.receiveTimeout:
-        return 'El servidor está tardando en analizar y buscar precios. Inténtalo de nuevo.';
+        return 'El servidor está tardando demasiado.';
       case DioExceptionType.badResponse:
         final statusCode = e.response?.statusCode;
-        if (statusCode == 400) return 'Imagen inválida o formato no soportado.';
-        if (statusCode == 422) return 'No se pudo identificar ningún producto en la imagen.';
-        if (statusCode == 401) return 'Sesión expirada.';
-        if (statusCode == 404) return 'Servicio no encontrado (Ruta incorrecta).';
+        if (statusCode == 404) return 'Producto no encontrado.';
         if (statusCode == 500) return 'Error interno del servidor.';
         return 'Error del servidor ($statusCode)';
-      case DioExceptionType.connectionError:
-        return 'No se pudo conectar al servidor. Verifica que estés en la misma WiFi.';
       default:
         return 'Error de red: ${e.message}';
     }
