@@ -4,22 +4,22 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:comparador_ra/data/services/ai_service.dart';
-import 'package:comparador_ra/presentation/blocs/auth/auth_bloc.dart';
-import 'package:comparador_ra/presentation/blocs/auth/auth_state.dart';
-import 'package:comparador_ra/presentation/blocs/favorite/favorite_bloc.dart';
-import 'package:comparador_ra/presentation/blocs/favorite/favorite_event.dart';
-import 'package:comparador_ra/presentation/blocs/favorite/favorite_state.dart';
+import '../../data/services/ai_service.dart';
+import '../blocs/auth/auth_bloc.dart';
+import '../blocs/auth/auth_state.dart';
+import '../blocs/favorite/favorite_bloc.dart';
+import '../blocs/favorite/favorite_event.dart';
+import '../blocs/favorite/favorite_state.dart';
 
 class AISearchScreen extends StatefulWidget {
   final String imagePath;
   final String? initialBarcode;
 
   const AISearchScreen({
-    Key? key,
+    super.key,
     required this.imagePath,
     this.initialBarcode,
-  }) : super(key: key);
+  });
 
   @override
   State<AISearchScreen> createState() => _AISearchScreenState();
@@ -50,7 +50,7 @@ class _AISearchScreenState extends State<AISearchScreen> {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
 
-      // Búsqueda Dual
+      // ✅ Llamada al servicio Dual que configuramos previamente
       final result = await _aiService.searchBarcodeWithImageFallback(
         barcode: _productBarcode ?? 'unknown',
         imageBytes: imageBytes,
@@ -60,7 +60,8 @@ class _AISearchScreenState extends State<AISearchScreen> {
       if (mounted) {
         setState(() {
           _result = result;
-          _productBarcode = result['barcode'];
+          // Actualizamos el barcode con el que la IA encontró (si antes era unknown)
+          _productBarcode = result['barcode']; 
           _isLoading = false;
         });
 
@@ -77,14 +78,14 @@ class _AISearchScreenState extends State<AISearchScreen> {
   }
 
   void _checkFavoriteStatus() {
-    if (_productBarcode == null) return;
+    if (_productBarcode == null || _productBarcode == 'unknown') return;
     if (context.read<AuthBloc>().state is Authenticated) {
       context.read<FavoriteBloc>().add(CheckFavorite(_productBarcode!));
     }
   }
 
   Future<void> _toggleFavorite() async {
-    if (_productBarcode == null || _isTogglingFavorite) return;
+    if (_productBarcode == null || _productBarcode == 'unknown' || _isTogglingFavorite) return;
 
     if (context.read<AuthBloc>().state is! Authenticated) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -97,6 +98,7 @@ class _AISearchScreenState extends State<AISearchScreen> {
 
     final data = _result;
     final prices = (data?['searchResults'] as List?) ?? [];
+    // Usamos la imagen del primer resultado de precio como imagen del producto
     final imageUrl = prices.isNotEmpty ? (prices[0]['image'] ?? '') : '';
 
     if (_isFavorite) {
@@ -105,28 +107,33 @@ class _AISearchScreenState extends State<AISearchScreen> {
       context.read<FavoriteBloc>().add(
         AddFavorite(
           barcode: _productBarcode!,
-          name: data?['identifiedProduct'] ?? 'Producto',
+          name: data?['identifiedProduct'] ?? 'Producto Identificado',
           imageUrl: imageUrl,
         ),
       );
     }
   }
 
-  Future<void> _openStoreUrl(String platform, String url) async {
+  Future<void> _openStoreUrl(String url) async {
     if (url.isEmpty) return;
     final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      debugPrint("Error abriendo URL: $e");
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text('Análisis IA'),
+        title: const Text('Resultado de Análisis'),
         actions: [
-          if (_productBarcode != null) 
+          if (_productBarcode != null && _productBarcode != 'unknown') 
             BlocListener<FavoriteBloc, FavoriteState>(
               listener: (context, state) {
                 if (state is FavoriteChecked) setState(() => _isFavorite = state.isFavorite);
@@ -137,32 +144,45 @@ class _AISearchScreenState extends State<AISearchScreen> {
               child: IconButton(
                 icon: _isTogglingFavorite 
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? Colors.red : null),
+                  : Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, 
+                         color: _isFavorite ? Colors.red : null),
                 onPressed: _isTogglingFavorite ? null : _toggleFavorite,
               ),
             ),
         ],
       ),
-      body: _isLoading ? _buildLoadingView() : 
-            (_errorMessage != null ? _buildErrorView() : _buildResultView()),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 400),
+        child: _isLoading 
+            ? _buildLoadingView() 
+            : (_errorMessage != null ? _buildErrorView() : _buildResultView()),
+      ),
     );
   }
 
-  // --- WIDGETS DE VISTA ---
+  // --- VISTAS ---
 
   Widget _buildLoadingView() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Image.file(File(widget.imagePath), width: 180, height: 180, fit: BoxFit.cover),
+          // Previsualización de la foto tomada
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Image.file(File(widget.imagePath), width: 220, height: 220, fit: BoxFit.cover),
+            ),
           ),
-          const SizedBox(height: 30),
+          const SizedBox(height: 40),
           const CircularProgressIndicator(),
-          const SizedBox(height: 15),
-          const Text('Analizando producto con IA...', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 20),
+          const Text('Buscando en tiendas...', 
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.blueGrey)),
         ],
       ),
     );
@@ -175,69 +195,147 @@ class _AISearchScreenState extends State<AISearchScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _buildInfoCard(data['identifiedProduct'] ?? 'Producto Identificado'),
-        const SizedBox(height: 20),
-        const Text('Comparativa de Precios', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 10),
+        _buildProductHeader(data['identifiedProduct'] ?? 'Producto'),
+        const SizedBox(height: 24),
+        const Row(
+          children: [
+            Icon(Icons.compare_arrows, color: Colors.blue),
+            SizedBox(width: 8),
+            Text('MEJORES PRECIOS', 
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+          ],
+        ),
+        const Divider(),
         if (prices.isEmpty) 
-          const Center(child: Text('No se encontraron precios actuales.'))
+          _buildNoResults()
         else 
           ...prices.map((p) => _buildPriceCard(p)).toList(),
+        const SizedBox(height: 30),
       ],
     );
   }
 
-  Widget _buildInfoCard(String name) {
-    return Card(
-      elevation: 0,
-      color: Colors.blue.shade50,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.green),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  Text('ID: $_productBarcode', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                ],
-              ),
-            ),
-          ],
-        ),
+  Widget _buildProductHeader(String name) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('IDENTIFICADO COMO:', 
+            style: TextStyle(fontSize: 10, color: Colors.blue, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text(name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.qr_code, size: 14, color: Colors.grey),
+              const SizedBox(width: 5),
+              Text('Barcode: ${_productBarcode ?? "N/A"}', 
+                style: const TextStyle(color: Colors.grey, fontSize: 13)),
+            ],
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildPriceCard(Map<String, dynamic> price) {
+    final bool hasDiscount = price['oldPrice'] != null;
+    
     return Card(
+      elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        leading: const Icon(Icons.storefront, color: Colors.blue),
-        title: Text(price['platform'] ?? 'Tienda'),
-        subtitle: Text(price['shipping'] == 0 ? 'Envío Gratis' : 'Consultar envío'),
-        trailing: Text(
-          'S/ ${price['price']}', // Localizado para Perú
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade200)
+      ),
+      child: InkWell(
+        onTap: () => _openStoreUrl(price['url'] ?? ''),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              // Imagen del producto en la tienda
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  price['image'] ?? '',
+                  width: 60, height: 60,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Icon(Icons.inventory, size: 40),
+                ),
+              ),
+              const SizedBox(width: 15),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(price['platform']?.toUpperCase() ?? 'TIENDA', 
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
+                    const SizedBox(height: 2),
+                    Text(price['title'] ?? 'Ver en tienda',
+                      maxLines: 2, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (hasDiscount)
+                    Text('S/ ${price['oldPrice']}', 
+                      style: const TextStyle(fontSize: 11, decoration: TextDecoration.lineThrough, color: Colors.red)),
+                  Text('S/ ${price['price']}', 
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
+                ],
+              ),
+              const Icon(Icons.chevron_right, color: Colors.grey),
+            ],
+          ),
         ),
-        onTap: () => _openStoreUrl(price['platform'], price['url'] ?? ''),
+      ),
+    );
+  }
+
+  Widget _buildNoResults() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 40),
+      child: Column(
+        children: [
+          Icon(Icons.search_off, size: 60, color: Colors.grey[400]),
+          const SizedBox(height: 10),
+          const Text('No se encontraron precios en tiendas online.', 
+            style: TextStyle(color: Colors.grey)),
+        ],
       ),
     );
   }
 
   Widget _buildErrorView() {
     return Center(
+      padding: const EdgeInsets.all(32),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.error_outline, size: 60, color: Colors.red),
-          const SizedBox(height: 16),
-          Text(_errorMessage ?? 'Error desconocido'),
-          TextButton(onPressed: () => context.pop(), child: const Text('Reintentar'))
+          const Icon(Icons.cloud_off, size: 80, color: Colors.redAccent),
+          const SizedBox(height: 20),
+          Text(_errorMessage ?? 'Error al procesar', 
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 30),
+          ElevatedButton.icon(
+            onPressed: () => context.pop(), 
+            icon: const Icon(Icons.arrow_back),
+            label: const Text('Intentar con otra foto'),
+            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
+          )
         ],
       ),
     );

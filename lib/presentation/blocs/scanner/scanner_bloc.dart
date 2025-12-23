@@ -26,9 +26,11 @@ class ScannerBloc extends Bloc<ScannerEvent, ScannerState> {
     BarcodeDetected event,
     Emitter<ScannerState> emit,
   ) async {
-    // Vibrar al detectar
-    if (await Vibration.hasVibrator() ?? false) {
-      Vibration.vibrate(duration: 100);
+    // Solo vibrar si no estábamos ya detectando el mismo código
+    if (state is! ScannerDetecting || (state as ScannerDetecting).barcode != event.barcode) {
+      if (await Vibration.hasVibrator() ?? false) {
+        Vibration.vibrate(duration: 100);
+      }
     }
 
     emit(ScannerDetecting(event.barcode, isFlashOn: _isFlashOn));
@@ -36,7 +38,9 @@ class ScannerBloc extends Bloc<ScannerEvent, ScannerState> {
 
   void _onToggleFlash(ToggleFlash event, Emitter<ScannerState> emit) {
     _isFlashOn = !_isFlashOn;
-    emit(ScannerReady(isFlashOn: _isFlashOn, isScanning: true));
+    // Mantenemos el estado de isScanning actual
+    final isScanning = state.isScanning;
+    emit(ScannerReady(isFlashOn: _isFlashOn, isScanning: isScanning));
   }
 
   void _onResetScanner(ResetScanner event, Emitter<ScannerState> emit) {

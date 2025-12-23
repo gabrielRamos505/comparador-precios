@@ -1,49 +1,64 @@
 import '../models/product.dart';
 import '../models/price_result.dart';
 import '../providers/search_provider.dart';
+import '../../data/services/ai_service.dart';
+import 'dart:typed_data';
 
 class ProductRepository {
   final SearchProvider _searchProvider;
+  final AIService _aiService = AIService(); // Instanciamos el servicio de IA
 
   ProductRepository(this._searchProvider);
 
-  // ✅ Búsqueda por Barcode OPTIMIZADA (1 sola llamada al backend)
+  /// ✅ Búsqueda DUAL (Barcode + Imagen) - El corazón de la App
+  Future<ProductSearchResult> identifyAndSearch({
+    required String barcode,
+    required Uint8List imageBytes,
+    String? token,
+  }) async {
+    try {
+      // Llamamos al servicio de identificación que usa Gemini + Scrapers
+      final result = await _aiService.searchBarcodeWithImageFallback(
+        barcode: barcode,
+        imageBytes: imageBytes,
+        token: token,
+      );
+
+      // Mapeamos la respuesta del backend a nuestros modelos locales
+      final product = Product(
+        barcode: result['barcode'] ?? barcode,
+        name: result['identifiedProduct'] ?? 'Producto Desconocido',
+        imageUrl: (result['searchResults'] as List).isNotEmpty 
+            ? result['searchResults'][0]['image'] ?? '' 
+            : '',
+        brand: '', // Puedes extraer más info si el backend la envía
+        category: '',
+      );
+
+      final List<PriceResult> prices = (result['searchResults'] as List)
+          .map((p) => PriceResult.fromJson(p))
+          .toList();
+
+      return ProductSearchResult(product: product, prices: prices);
+    } catch (e) {
+      throw Exception(_cleanError(e));
+    }
+  }
+
+  /// Búsqueda por Barcode simple (Tradicional)
   Future<ProductSearchResult> searchByBarcode(String barcode) async {
     try {
-      print('🔍 Repository: Buscando barcode $barcode...');
-      
-      // Usamos el método optimizado del provider
       final resultMap = await _searchProvider.searchFullProduct(barcode);
-      
-      final product = resultMap['product'] as Product;
-      final prices = resultMap['prices'] as List<PriceResult>;
-
-      print('✅ Repository: Producto encontrado "${product.name}" con ${prices.length} precios.');
-      
-      return ProductSearchResult(product: product, prices: prices);
-
-    } catch (e) {
-      // Propagamos el error limpio para que la UI muestre el mensaje correcto
-      // (Ej: "Tiempo de espera agotado" o "Producto no encontrado")
-      throw _cleanError(e);
-    }
-  }
-
-  // ✅ Búsqueda por Nombre (Texto)
-  // Útil si quieres agregar una barra de búsqueda manual en la app
-  Future<List<ProductSearchResult>> searchByName(String query) async {
-    try {
-      // Nota: Necesitarías agregar `searchByName` en tu SearchProvider si quieres usar esto.
-      // Por ahora es solo un placeholder para futura expansión.
-      return []; 
+      return ProductSearchResult(
+        product: resultMap['product'] as Product,
+        prices: resultMap['prices'] as List<PriceResult>
+      );
     } catch (e) {
       throw _cleanError(e);
     }
   }
 
-  // Helper para limpiar mensajes de error
-  Exception _cleanError(dynamic e) {
-    final message = e.toString().replaceAll('Exception: ', '');
-    return Exception(message);
+  String _cleanError(dynamic e) {
+    return e.toString().replaceAll('Exception: ', '').trim();
   }
 }

@@ -21,11 +21,13 @@ class Product extends Equatable {
 
   factory Product.fromJson(Map<String, dynamic> json) {
     return Product(
-      id: (json['id'] ?? json['productId'] ?? '').toString(),
-      barcode: json['barcode'] ?? '',
-      name: json['name'] ?? json['productName'] ?? 'Producto sin nombre',
+      // ✅ Aseguramos que el ID nunca sea nulo y soporte múltiples keys del backend
+      id: (json['id'] ?? json['_id'] ?? json['productId'] ?? '').toString(),
+      barcode: (json['barcode'] ?? '').toString(),
+      name: json['name'] ?? json['productName'] ?? 'Producto identificado',
       brand: json['brand'],
       category: json['category'],
+      // ✅ Soporte para snake_case y camelCase de APIs externas
       imageUrl: json['image_url'] ?? json['imageUrl'] ?? json['image'],
       description: json['description'],
     );
