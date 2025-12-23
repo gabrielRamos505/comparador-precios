@@ -159,7 +159,16 @@ class ProductController {
             res.status(500).json({ success: false, error: error.message });
         }
     }
+    async testUrls(req, res) {
+        const testUrls = {
+            'Metro': 'https://www.metro.pe/busca/?ft=coca+cola',
+            'Plaza Vea': 'https://www.plazavea.com.pe/busca?ft=coca+cola',
+            'Wong': 'https://www.wong.pe/busca?ft=coca+cola',
+            'Tottus': 'https://www.tottus.com.pe/tottus-pe/search/?text=coca+cola',
+        };
 
+        res.json({ urls: testUrls });
+    }
     // ---------------------------------------------------------
     // HISTORIAL DE PRECIOS
     // ---------------------------------------------------------

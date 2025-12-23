@@ -12,7 +12,7 @@ class AIService {
     }
 
     /**
-     * Identifica un producto a partir de una imagen en Base64 usando Gemini 1.5 Flash.
+     * Identifica un producto a partir de una imagen en Base64 usando Gemini.
      * @param {string} imageBase64 - Imagen en formato Base64
      * @returns {Promise<Object>} - Objeto con información del producto identificado
      */
@@ -33,20 +33,23 @@ class AIService {
             // 2. Limpieza del string base64
             const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
-            // 3. Configuración del modelo con MODO JSON forzado
+            // 3. ✅ CORRECCIÓN: Usar el modelo correcto
+            // Los modelos disponibles son:
+            // - gemini-1.5-pro (más preciso pero más lento y caro)
+            // - gemini-1.5-flash-latest (rápido y económico)
+            // - gemini-pro-vision (versión antigua)
             const model = this.genAI.getGenerativeModel({
-                model: 'gemini-1.5-flash',
+                model: 'gemini-1.5-flash-latest', // ✅ Cambio crítico
                 generationConfig: {
-                    responseMimeType: "application/json",
-                    temperature: 0.1, // Respuestas precisas
-                    maxOutputTokens: 500, // Limitar respuesta
+                    temperature: 0.1,
+                    maxOutputTokens: 500,
                 }
             });
 
             // 4. Prompt optimizado para retail peruano
             const prompt = `Actúa como un experto en retail peruano. Analiza esta imagen de producto y extrae datos para un comparador de precios.
 
-IMPORTANTE: Responde SOLO con un objeto JSON válido, sin texto adicional.
+IMPORTANTE: Responde SOLO con un objeto JSON válido, sin texto adicional antes o después.
 
 Formato requerido:
 {
@@ -58,11 +61,13 @@ Formato requerido:
 }
 
 REGLAS CRÍTICAS:
-- Identifica correctamente marcas peruanas (Bell's, Gloria, Inca Kola, Pilsen, etc.)
-- Si es marca propia de supermercado (Tottus, Metro, Wong), menciónalo
+- Identifica correctamente marcas peruanas (Bell's, Gloria, Inca Kola, Pilsen, Cielo, San Luis, etc.)
+- Si es marca propia de supermercado (Tottus, Metro, Wong, Plaza Vea), menciónalo
 - No inventes información que no veas claramente
-- Si ves un código de barras, inclúyelo en productName entre paréntesis
-- Para bebidas, especifica el sabor si es visible (ej: "Inca Kola Sin Azúcar 1.5L")`;
+- Para bebidas, especifica el sabor si es visible (ej: "Inca Kola Sin Azúcar 1.5L")
+- Si no puedes identificar el producto claramente, usa confidence: "low"
+
+Responde ÚNICAMENTE con el JSON, sin markdown ni explicaciones.`;
 
             const imagePart = {
                 inlineData: {
@@ -76,20 +81,44 @@ REGLAS CRÍTICAS:
             const response = await result.response;
             const text = response.text();
 
-            console.log('🤖 AI Respuesta Raw:', text.substring(0, 200) + '...');
+            console.log('🤖 AI Respuesta Raw:', text.substring(0, 300));
 
             // 6. Parseo seguro del JSON
             let aiData;
             try {
-                // Intento directo
-                aiData = JSON.parse(text);
+                // Limpiar markdown si existe
+                let cleanText = text.trim();
+
+                // Remover bloques de código markdown si existen
+                if (cleanText.startsWith('```json')) {
+                    cleanText = cleanText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+                } else if (cleanText.startsWith('```')) {
+                    cleanText = cleanText.replace(/```\n?/g, '');
+                }
+
+                // Intento directo de parseo
+                aiData = JSON.parse(cleanText.trim());
             } catch (e) {
-                // Intento de rescate si Gemini añade texto extra
+                console.warn('⚠️ Primer intento de parseo falló, intentando rescate...');
+
+                // Intento de rescate: buscar el JSON en el texto
                 const jsonMatch = text.match(/\{[\s\S]*\}/);
                 if (jsonMatch) {
-                    aiData = JSON.parse(jsonMatch[0]);
+                    try {
+                        aiData = JSON.parse(jsonMatch[0]);
+                    } catch (e2) {
+                        console.error('❌ AI: No se pudo parsear JSON después del rescate');
+                        console.error('Texto recibido:', text);
+                        return {
+                            success: false,
+                            name: null,
+                            error: 'La IA no devolvió un formato JSON válido',
+                            confidence: 'low'
+                        };
+                    }
                 } else {
-                    console.error('❌ AI: No se pudo parsear JSON:', text);
+                    console.error('❌ AI: No se encontró JSON en la respuesta');
+                    console.error('Texto recibido:', text);
                     return {
                         success: false,
                         name: null,
@@ -99,18 +128,29 @@ REGLAS CRÍTICAS:
                 }
             }
 
-            // 7. Validación de confianza y datos mínimos
-            if (!aiData || !aiData.productName || aiData.confidence === 'low') {
-                console.warn('⚠️ AI: Baja confianza o producto no detectado.');
+            // 7. Validación de datos mínimos
+            if (!aiData || !aiData.productName) {
+                console.warn('⚠️ AI: Respuesta sin nombre de producto');
                 return {
                     success: false,
                     name: null,
-                    error: 'No se pudo identificar el producto con claridad',
-                    confidence: aiData?.confidence || 'low'
+                    error: 'No se pudo identificar el producto',
+                    confidence: 'low'
                 };
             }
 
-            // 8. Construcción del nombre final optimizado para scrapers
+            // 8. Validación de confianza
+            if (aiData.confidence === 'low') {
+                console.warn('⚠️ AI: Baja confianza en la identificación');
+                return {
+                    success: false,
+                    name: aiData.productName || null,
+                    error: 'No se pudo identificar el producto con claridad',
+                    confidence: 'low'
+                };
+            }
+
+            // 9. Construcción del nombre final optimizado para scrapers
             let finalSearchName = aiData.productName.trim();
 
             // Si el nombre no incluye la cantidad y existe, agregarla
@@ -118,14 +158,14 @@ REGLAS CRÍTICAS:
                 finalSearchName = `${finalSearchName} ${aiData.quantity}`;
             }
 
-            // 9. Generación de ID temporal único
+            // 10. Generación de ID temporal único
             const timestamp = Date.now();
             const safeName = aiData.productName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase();
             const temporaryBarcode = `AI-${safeName}-${timestamp}`;
 
             console.log(`✅ AI Identificado: "${finalSearchName}" (Confianza: ${aiData.confidence})`);
 
-            // 10. Respuesta estandarizada
+            // 11. Respuesta estandarizada
             return {
                 success: true,
                 id: temporaryBarcode,
@@ -141,26 +181,39 @@ REGLAS CRÍTICAS:
 
         } catch (error) {
             console.error('❌ Error en AIService.identifyProduct:', error.message);
+            console.error('Stack:', error.stack);
 
             // Errores específicos de la API de Gemini
-            if (error.message.includes('API key')) {
+            if (error.message.includes('API key') || error.message.includes('PERMISSION_DENIED')) {
                 return {
                     success: false,
-                    error: 'Error de configuración del servicio de IA',
+                    name: null,
+                    error: 'Error de configuración del servicio de IA (API Key inválida)',
                     confidence: 'low'
                 };
             }
 
-            if (error.message.includes('quota') || error.message.includes('limit')) {
+            if (error.message.includes('quota') || error.message.includes('limit') || error.message.includes('RESOURCE_EXHAUSTED')) {
                 return {
                     success: false,
-                    error: 'Límite de uso de IA alcanzado temporalmente',
+                    name: null,
+                    error: 'Límite de uso de IA alcanzado temporalmente. Intenta en unos minutos.',
+                    confidence: 'low'
+                };
+            }
+
+            if (error.message.includes('404') || error.message.includes('not found') || error.message.includes('is not found')) {
+                return {
+                    success: false,
+                    name: null,
+                    error: 'Modelo de IA no disponible temporalmente',
                     confidence: 'low'
                 };
             }
 
             return {
                 success: false,
+                name: null,
                 error: 'Error de comunicación con el servicio de IA',
                 confidence: 'low'
             };
@@ -182,8 +235,14 @@ REGLAS CRÍTICAS:
         const sizeInBytes = (imageBase64.length * (3 / 4));
         const sizeInMB = sizeInBytes / (1024 * 1024);
 
-        if (sizeInMB > 5) { // Límite de 5MB para Gemini Flash
-            console.warn(`⚠️ Imagen rechazada por tamaño: ${sizeInMB.toFixed(2)}MB (máx 5MB)`);
+        if (sizeInMB > 10) { // Límite aumentado a 10MB
+            console.warn(`⚠️ Imagen rechazada por tamaño: ${sizeInMB.toFixed(2)}MB (máx 10MB)`);
+            return false;
+        }
+
+        // Verificar longitud mínima
+        if (imageBase64.length < 100) {
+            console.warn('⚠️ Imagen rechazada: demasiado pequeña');
             return false;
         }
 
@@ -217,6 +276,7 @@ REGLAS CRÍTICAS:
             console.error('❌ Error descargando imagen:', error.message);
             return {
                 success: false,
+                name: null,
                 error: 'No se pudo descargar la imagen desde la URL',
                 confidence: 'low'
             };

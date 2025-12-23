@@ -124,18 +124,48 @@ Future<void> _identifyProduct() async {
       );
     }
   }
+Future<void> _openStoreUrl(String url) async {
+  if (url.isEmpty) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ URL no disponible')),
+      );
+    }
+    return;
+  }
 
-  Future<void> _openStoreUrl(String url) async {
-    if (url.isEmpty) return;
+  try {
     final uri = Uri.parse(url);
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
+    
+    // ✅ CRÍTICO: Verificar si la URL se puede abrir
+    if (await canLaunchUrl(uri)) {
+      // ✅ Abrir en navegador externo para evitar bloqueos
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication, // Abre en Chrome/Safari
+      );
+      
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('❌ No se pudo abrir el enlace')),
+        );
       }
-    } catch (e) {
-      debugPrint("Error abriendo URL: $e");
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ URL no válida: $url')),
+        );
+      }
+    }
+  } catch (e) {
+    debugPrint("❌ Error abriendo URL: $e");
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('❌ Error al abrir: ${e.toString()}')),
+      );
     }
   }
+}
 
   @override
   Widget build(BuildContext context) {

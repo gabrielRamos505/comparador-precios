@@ -246,16 +246,16 @@ class ProductAggregatorService {
         // 2. Ordenar por precio (Menor a Mayor)
         uniquePrices.sort((a, b) => (a.price || 999999) - (b.price || 999999));
 
-        // 3. Validar y construir URLs finales
-        const validatedPrices = this.validateUrls(uniquePrices, productName);
+        // 3. ✅ NUEVO: Normalizar todas las URLs antes de enviar
+        const normalizedPrices = this.normalizeUrls(uniquePrices, productName);
 
-        console.log(`\n💰 RESULTADO: ${validatedPrices.length} opciones encontradas.`);
-        if (validatedPrices.length > 0) {
-            console.log(`💵 Precio Mínimo: S/ ${validatedPrices[0].price.toFixed(2)}`);
+        console.log(`\n💰 RESULTADO: ${normalizedPrices.length} opciones encontradas.`);
+        if (normalizedPrices.length > 0) {
+            console.log(`💵 Precio Mínimo: S/ ${normalizedPrices[0].price.toFixed(2)}`);
         }
         console.log(`${'='.repeat(60)}\n`);
 
-        return validatedPrices;
+        return normalizedPrices;
     }
 
     // ---------------------------------------------------------
@@ -277,34 +277,86 @@ class ProductAggregatorService {
         return Array.from(uniqueMap.values());
     }
 
-    validateUrls(products, searchQuery) {
+    /**
+     * ✅ MÉTODO NUEVO: Normaliza todas las URLs de productos
+     * Asegura que todas las URLs sean absolutas y válidas
+     */
+    normalizeUrls(products, searchQuery) {
         return products.map(product => {
-            // Si la URL es inválida, generamos una búsqueda directa en la tienda
-            if (!product.url ||
-                product.url === 'null' ||
-                product.url === 'undefined' ||
-                !product.url.startsWith('http')) {
+            const platform = product.platform || product.store || 'unknown';
+            let url = product.url;
 
-                const encodedQuery = encodeURIComponent(searchQuery);
-                const storeUrls = {
-                    'Metro': `https://www.metro.pe/${encodedQuery}?_q=${encodedQuery}&map=ft`,
-                    'Plaza Vea': `https://www.plazavea.com.pe/${encodedQuery}?_q=${encodedQuery}&map=ft`,
-                    'Wong': `https://www.wong.pe/${encodedQuery}?_q=${encodedQuery}&map=ft`,
-                    'Tottus': `https://www.tottus.com.pe/tottus-pe/buscar?Ntt=${encodedQuery}`,
-                    'Google Shopping': `https://www.google.com/search?q=${encodedQuery}+precio+peru&tbm=shop`,
-                    'Mercado Libre': `https://listado.mercadolibre.com.pe/${encodedQuery.replace(/%20/g, '-')}`
+            // ✅ PASO 1: Si ya tiene URL válida y absoluta, validarla
+            if (url && url !== 'null' && url !== 'undefined') {
+                // Si ya es una URL absoluta válida, mantenerla
+                if (url.startsWith('http://') || url.startsWith('https://')) {
+                    return { ...product, url };
+                }
+
+                // Si es relativa, convertirla a absoluta según la plataforma
+                const baseUrls = {
+                    'Metro': 'https://www.metro.pe',
+                    'Plaza Vea': 'https://www.plazavea.com.pe',
+                    'Wong': 'https://www.wong.pe',
+                    'Tottus': 'https://www.tottus.com.pe',
+                    'Mercado Libre': 'https://www.mercadolibre.com.pe',
+                    'Amazon': 'https://www.amazon.com',
                 };
 
-                product.url = storeUrls[product.platform] || `https://www.google.com/search?q=${encodedQuery}+${product.platform}+peru`;
+                const baseUrl = baseUrls[platform];
+                if (baseUrl) {
+                    // Si la URL empieza con /, agregarla al dominio
+                    if (url.startsWith('/')) {
+                        return { ...product, url: `${baseUrl}${url}` };
+                    }
+                    // Si no, agregarla con / adicional
+                    return { ...product, url: `${baseUrl}/${url}` };
+                }
+
+                // Si llegamos aquí, mantener la URL original (puede ser de otra plataforma)
+                return { ...product, url };
             }
-            return product;
-        }).filter(p => p.url && p.url.startsWith('http'));
+
+            // ✅ PASO 2: Si no tiene URL, generar una de búsqueda
+            const cleanQuery = (searchQuery || product.name || '').trim();
+            const encodedQuery = encodeURIComponent(cleanQuery);
+
+            const searchUrls = {
+                'Metro': `https://www.metro.pe/busca?ft=${encodedQuery}`,
+                'Plaza Vea': `https://www.plazavea.com.pe/busca?ft=${encodedQuery}`,
+                'Wong': `https://www.wong.pe/busca?ft=${encodedQuery}`,
+                'Tottus': `https://www.tottus.com.pe/tottus-pe/search?text=${encodedQuery}`,
+                'Google Shopping': `https://www.google.com/search?q=${encodedQuery}+precio+peru&tbm=shop`,
+                'Mercado Libre': `https://listado.mercadolibre.com.pe/${cleanQuery.replace(/\s+/g, '-').toLowerCase()}`,
+                'Amazon': `https://www.amazon.com/s?k=${encodedQuery}`,
+            };
+
+            const fallbackUrl = searchUrls[platform] ||
+                `https://www.google.com/search?q=${encodedQuery}+${platform}+peru`;
+
+            return { ...product, url: fallbackUrl };
+
+        }).filter(p => {
+            // ✅ PASO 3: Filtrar solo productos con URLs válidas
+            return p.url &&
+                p.url !== 'null' &&
+                p.url !== 'undefined' &&
+                (p.url.startsWith('http://') || p.url.startsWith('https://'));
+        });
     }
 
     async searchMercadoLibre(productName) {
         try {
             console.log(`🛒 [ML] Consultando Mercado Libre Perú...`);
-            return await mercadoLibreService.searchByName(productName) || [];
+            const results = await mercadoLibreService.searchByName(productName) || [];
+
+            // ✅ Asegurar que las URLs sean absolutas
+            return results.map(item => ({
+                ...item,
+                url: item.url && item.url.startsWith('http')
+                    ? item.url
+                    : `https://www.mercadolibre.com.pe${item.url || ''}`
+            }));
         } catch (error) {
             console.error(`❌ ML Error: ${error.message}`);
             return [];
@@ -335,10 +387,14 @@ class ProductAggregatorService {
         // Ejecutar todos los scrapers simultáneamente
         const promises = stores.map(store =>
             store.scraper.searchProducts(productName)
-                .then(products => (products || []).map(p => ({
-                    ...p,
-                    platform: p.platform || store.name
-                })))
+                .then(products => {
+                    // ✅ Los scrapers ya retornan URLs normalizadas
+                    // Solo aseguramos que tengan el campo platform
+                    return (products || []).map(p => ({
+                        ...p,
+                        platform: p.platform || store.name
+                    }));
+                })
                 .catch(error => {
                     console.error(`   ❌ Error en ${store.name}: ${error.message}`);
                     return [];
