@@ -78,20 +78,41 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
   }
 
-  void _onDetect(BarcodeCapture capture) {
+// 1. Modificamos la detección para ser más inteligente
+  void _onDetect(BarcodeCapture capture) async {
     final List<Barcode> barcodes = capture.barcodes;
-
     if (barcodes.isEmpty || _isProcessing) return;
 
-    for (final barcode in barcodes) {
-      final String? code = barcode.rawValue;
-      if (code != null && code != _lastScannedBarcode) {
-        _lastScannedBarcode = code;
-        _isProcessing = true;
+    final String? code = barcodes.first.rawValue;
+    
+    if (code != null && code != _lastScannedBarcode) {
+      _isProcessing = true;
+      _lastScannedBarcode = code;
 
-        context.read<ScannerBloc>().add(BarcodeDetected(code));
+      try {
+        // ✅ MEJORA: Al detectar un código, capturamos una imagen 
+        // para tener el respaldo de IA por si el barcode no existe en base de datos.
+        final captureFile = await _scannerController.takePicture();
+        
+        if (mounted) {
+          // Bloqueamos el scanner visualmente
+          context.read<ScannerBloc>().add(BarcodeDetected(code));
+          
+          // ✅ Navegamos a la pantalla de IA enviando AMBOS datos
+          // Así, la AISearchScreen se encarga de la lógica dual.
+          context.push('/ai-search', extra: {
+            'imagePath': captureFile.path,
+            'barcode': code,
+          });
+        }
+      } catch (e) {
+        // Si falla la foto, al menos intentamos la búsqueda tradicional
         _searchProduct(code);
-        break;
+      } finally {
+        // Reset tras un delay para permitir nuevos escaneos después
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) _isProcessing = false;
+        });
       }
     }
   }
@@ -100,20 +121,28 @@ class _ScannerScreenState extends State<ScannerScreen>
     context.read<ProductBloc>().add(SearchProductByBarcode(barcode));
   }
 
-  /// 🆕 NUEVA FUNCIÓN: Búsqueda por foto usando IA
+// 2. Ajuste en la función de Búsqueda por Foto (Botón Azul)
   Future<void> _searchByPhoto() async {
     try {
+      // Detenemos el scanner para no consumir recursos mientras se usa la cámara de fotos
+      await _scannerController.stop();
+
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
+        maxWidth: 1024, // Bajamos un poco la resolución para subir más rápido a la IA
+        imageQuality: 80,
       );
 
       if (image != null && mounted) {
-        // Navegar a pantalla de IA con la imagen
-        context.push('/ai-search', extra: image.path);
+        // Navegar enviando un mapa para mantener consistencia
+        context.push('/ai-search', extra: {
+          'imagePath': image.path,
+          'barcode': null, // No hay barcode porque fue una foto manual
+        });
       }
+      
+      // Reiniciamos el scanner al volver
+      await _scannerController.start();
     } catch (e) {
       _showError('Error al capturar foto: $e');
     }

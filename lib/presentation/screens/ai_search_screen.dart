@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart'; // ✅ Agregar
+import 'package:url_launcher/url_launcher.dart';
 import 'package:comparador_ra/data/services/ai_service.dart';
 import 'package:comparador_ra/presentation/blocs/auth/auth_bloc.dart';
 import 'package:comparador_ra/presentation/blocs/auth/auth_state.dart';
@@ -13,8 +13,13 @@ import 'package:comparador_ra/presentation/blocs/favorite/favorite_state.dart';
 
 class AISearchScreen extends StatefulWidget {
   final String imagePath;
+  final String? initialBarcode;
 
-  const AISearchScreen({Key? key, required this.imagePath}) : super(key: key);
+  const AISearchScreen({
+    Key? key,
+    required this.imagePath,
+    this.initialBarcode,
+  }) : super(key: key);
 
   @override
   State<AISearchScreen> createState() => _AISearchScreenState();
@@ -27,167 +32,91 @@ class _AISearchScreenState extends State<AISearchScreen> {
   Map<String, dynamic>? _result;
   String? _productBarcode;
   bool _isFavorite = false;
-  bool _isTogglingFavorite = false; // ✅ Prevenir doble click
+  bool _isTogglingFavorite = false;
 
   @override
   void initState() {
     super.initState();
+    _productBarcode = widget.initialBarcode;
     _identifyProduct();
   }
 
   Future<void> _identifyProduct() async {
     try {
       final file = File(widget.imagePath);
+      if (!await file.exists()) throw Exception("Imagen no encontrada");
+      
       final imageBytes = await file.readAsBytes();
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
 
-      String? token;
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        token = prefs.getString('auth_token');
-        
-        if (token != null && token.isNotEmpty) {
-          print('🔑 Token obtenido: ${token.substring(0, 20)}...');
-        } else {
-          print('⚠️ Usuario no autenticado, búsqueda anónima');
-        }
-      } catch (e) {
-        print('⚠️ Error obteniendo token: $e');
-      }
-
-      final result = await _aiService.identifyProduct(
-        imageBytes,
+      // Búsqueda Dual
+      final result = await _aiService.searchBarcodeWithImageFallback(
+        barcode: _productBarcode ?? 'unknown',
+        imageBytes: imageBytes,
         token: token,
       );
 
-      setState(() {
-        _result = result;
-        _productBarcode = result['barcode']; // 👈 Corregido: barcode está en el root de data
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _result = result;
+          _productBarcode = result['barcode'];
+          _isLoading = false;
+        });
 
-      print('✅ Barcode del producto: $_productBarcode');
-
-      if (_productBarcode != null) {
-        _checkFavoriteStatus();
+        if (_productBarcode != null) _checkFavoriteStatus();
       }
     } catch (e) {
-      setState(() {
-        _errorMessage = e.toString();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString().replaceAll('Exception:', '').trim();
+          _isLoading = false;
+        });
+      }
     }
   }
 
   void _checkFavoriteStatus() {
     if (_productBarcode == null) return;
-
-    final authState = context.read<AuthBloc>().state;
-    if (authState is Authenticated) {
-      context.read<FavoriteBloc>().add(
-        CheckFavorite(_productBarcode!),
-      );
+    if (context.read<AuthBloc>().state is Authenticated) {
+      context.read<FavoriteBloc>().add(CheckFavorite(_productBarcode!));
     }
   }
 
   Future<void> _toggleFavorite() async {
-    if (_productBarcode == null || _isTogglingFavorite) {
-      return;
-    }
+    if (_productBarcode == null || _isTogglingFavorite) return;
 
-    final authState = context.read<AuthBloc>().state;
-    if (authState is! Authenticated) {
+    if (context.read<AuthBloc>().state is! Authenticated) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ Debes iniciar sesión')),
+        const SnackBar(content: Text('⚠️ Inicia sesión para guardar favoritos')),
       );
       return;
     }
 
-    setState(() {
-      _isTogglingFavorite = true;
-    });
+    setState(() => _isTogglingFavorite = true);
 
     final data = _result;
-    final productName = data?['identifiedProduct'] ?? 'Producto';
     final prices = (data?['searchResults'] as List?) ?? [];
-    final imageUrl = prices.isNotEmpty ? prices[0]['image'] ?? prices[0]['image_url'] ?? '' : '';
+    final imageUrl = prices.isNotEmpty ? (prices[0]['image'] ?? '') : '';
 
     if (_isFavorite) {
-      context.read<FavoriteBloc>().add(
-        RemoveFavorite(_productBarcode!),
-      );
+      context.read<FavoriteBloc>().add(RemoveFavorite(_productBarcode!));
     } else {
       context.read<FavoriteBloc>().add(
         AddFavorite(
           barcode: _productBarcode!,
-          name: productName,
+          name: data?['identifiedProduct'] ?? 'Producto',
           imageUrl: imageUrl,
         ),
       );
     }
-
-    await Future.delayed(const Duration(milliseconds: 500));
-    
-    if (mounted) {
-      setState(() {
-        _isTogglingFavorite = false;
-      });
-    }
   }
 
-  // ✅ Función para abrir URL con confirmación
   Future<void> _openStoreUrl(String platform, String url) async {
-    if (url.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('⚠️ No hay enlace disponible'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
-
-    final shouldOpen = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Abrir tienda'),
-        content: Text(
-          '¿Deseas abrir $platform en el navegador?',
-          style: const TextStyle(fontSize: 16),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Abrir'),
-          ),
-        ],
-      ),
-    );
-
-    if (shouldOpen == true && mounted) {
-      try {
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(
-            uri,
-            mode: LaunchMode.externalApplication,
-          );
-        } else {
-          throw 'No se pudo abrir el enlace';
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('❌ Error: ${e.toString()}'),
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
-      }
+    if (url.isEmpty) return;
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -195,66 +124,31 @@ class _AISearchScreenState extends State<AISearchScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Búsqueda por IA'),
-        actions: _productBarcode != null ? [
-          BlocListener<FavoriteBloc, FavoriteState>(
-            listener: (context, state) {
-              if (state is FavoriteChecked) {
-                setState(() {
-                  _isFavorite = state.isFavorite;
-                  _isTogglingFavorite = false;
-                });
-              } else if (state is FavoriteAdded) {
-                setState(() {
-                  _isFavorite = true;
-                  _isTogglingFavorite = false;
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('✅ Agregado a favoritos'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              } else if (state is FavoriteRemoved) {
-                setState(() {
-                  _isFavorite = false;
-                  _isTogglingFavorite = false;
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('❌ Eliminado de favoritos'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              }
-            },
-            child: IconButton(
-              icon: _isTogglingFavorite
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : Icon(
-                      _isFavorite ? Icons.favorite : Icons.favorite_border,
-                      color: _isFavorite ? Colors.red : null,
-                    ),
-              onPressed: _isTogglingFavorite ? null : _toggleFavorite,
-              tooltip: _isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos',
+        title: const Text('Análisis IA'),
+        actions: [
+          if (_productBarcode != null) 
+            BlocListener<FavoriteBloc, FavoriteState>(
+              listener: (context, state) {
+                if (state is FavoriteChecked) setState(() => _isFavorite = state.isFavorite);
+                if (state is FavoriteAdded) setState(() => _isFavorite = true);
+                if (state is FavoriteRemoved) setState(() => _isFavorite = false);
+                setState(() => _isTogglingFavorite = false);
+              },
+              child: IconButton(
+                icon: _isTogglingFavorite 
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? Colors.red : null),
+                onPressed: _isTogglingFavorite ? null : _toggleFavorite,
+              ),
             ),
-          ),
-        ] : null,
+        ],
       ),
-      body: _isLoading
-          ? _buildLoadingView()
-          : _errorMessage != null
-              ? _buildErrorView()
-              : _buildResultView(),
+      body: _isLoading ? _buildLoadingView() : 
+            (_errorMessage != null ? _buildErrorView() : _buildResultView()),
     );
   }
+
+  // --- WIDGETS DE VISTA ---
 
   Widget _buildLoadingView() {
     return Center(
@@ -263,53 +157,55 @@ class _AISearchScreenState extends State<AISearchScreen> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(16),
-            child: Image.file(
-              File(widget.imagePath),
-              width: 200,
-              height: 200,
-              fit: BoxFit.cover,
-            ),
+            child: Image.file(File(widget.imagePath), width: 180, height: 180, fit: BoxFit.cover),
           ),
-          const SizedBox(height: 40),
+          const SizedBox(height: 30),
           const CircularProgressIndicator(),
-          const SizedBox(height: 20),
-          const Text(
-            '🤖 Analizando imagen con IA...',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Identificando producto y buscando precios',
-            style: TextStyle(color: Colors.grey),
-          ),
+          const SizedBox(height: 15),
+          const Text('Analizando producto con IA...', style: TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),
     );
   }
 
-  Widget _buildErrorView() {
-    return Center(
+  Widget _buildResultView() {
+    final data = _result!;
+    final prices = (data['searchResults'] as List?) ?? [];
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _buildInfoCard(data['identifiedProduct'] ?? 'Producto Identificado'),
+        const SizedBox(height: 20),
+        const Text('Comparativa de Precios', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        if (prices.isEmpty) 
+          const Center(child: Text('No se encontraron precios actuales.'))
+        else 
+          ...prices.map((p) => _buildPriceCard(p)).toList(),
+      ],
+    );
+  }
+
+  Widget _buildInfoCard(String name) {
+    return Card(
+      elevation: 0,
+      color: Colors.blue.shade50,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+        padding: const EdgeInsets.all(16),
+        child: Row(
           children: [
-            const Icon(Icons.error_outline, size: 80, color: Colors.red),
-            const SizedBox(height: 20),
-            const Text(
-              'Error al identificar producto',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _errorMessage ?? 'Error desconocido',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.grey),
-            ),
-            const SizedBox(height: 30),
-            ElevatedButton(
-              onPressed: () => context.pop(),
-              child: const Text('Reintentar'),
+            const Icon(Icons.check_circle, color: Colors.green),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text('ID: $_productBarcode', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                ],
+              ),
             ),
           ],
         ),
@@ -317,194 +213,32 @@ class _AISearchScreenState extends State<AISearchScreen> {
     );
   }
 
-  Widget _buildResultView() {
-    final data = _result;
-    final productName = data?['identifiedProduct'] ?? 'Producto desconocido';
-    final prices = (data?['searchResults'] as List?) ?? [];
-
-    if (prices.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.file(
-                  File(widget.imagePath),
-                  width: 120,
-                  height: 120,
-                  fit: BoxFit.cover,
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Icon(Icons.search_off, size: 80, color: Colors.orange),
-              const SizedBox(height: 20),
-              Text(
-                productName,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'No se encontraron precios para este producto',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
-              ),
-              const SizedBox(height: 30),
-              ElevatedButton(
-                onPressed: () => context.pop(),
-                child: const Text('Intentar de nuevo'),
-              ),
-            ],
-          ),
+  Widget _buildPriceCard(Map<String, dynamic> price) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: const Icon(Icons.storefront, color: Colors.blue),
+        title: Text(price['platform'] ?? 'Tienda'),
+        subtitle: Text(price['shipping'] == 0 ? 'Envío Gratis' : 'Consultar envío'),
+        trailing: Text(
+          'S/ ${price['price']}', // Localizado para Perú
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green),
         ),
-      );
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(
-                      File(widget.imagePath),
-                      width: 80,
-                      height: 80,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          '✅ Producto identificado',
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          productName,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        if (_productBarcode != null) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            'ID: ${_productBarcode!.length > 40 ? "${_productBarcode!.substring(0, 40)}..." : _productBarcode}',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey.shade600,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          Text(
-            '💰 ${prices.length} tiendas encontradas',
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-
-          ...prices.map((price) => _buildPriceCard(price)).toList(),
-        ],
+        onTap: () => _openStoreUrl(price['platform'], price['url'] ?? ''),
       ),
     );
   }
 
-  Widget _buildPriceCard(Map<String, dynamic> price) {
-    final platform = price['platform'] ?? 'Tienda';
-    final amount = price['price']?.toString() ?? '0.00';
-    final shipping = price['shipping'] ?? 0;
-    final url = price['url'] ?? '';
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        onTap: url.isNotEmpty ? () => _openStoreUrl(platform, url) : null, // ✅ Con confirmación
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              const Icon(Icons.store, color: Colors.blue, size: 40),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      platform,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      shipping == 0 || shipping == 'N/A' 
-                        ? 'Envío: Gratis ✨' 
-                        : 'Envío: \$$shipping',
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    if (url.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      // ✅ Indicador de enlace
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.open_in_new,
-                            size: 14,
-                            color: Colors.blue.shade700,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Toca para abrir',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.blue.shade700,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              Text(
-                '\$$amount',
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.green,
-                ),
-              ),
-            ],
-          ),
-        ),
+  Widget _buildErrorView() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error_outline, size: 60, color: Colors.red),
+          const SizedBox(height: 16),
+          Text(_errorMessage ?? 'Error desconocido'),
+          TextButton(onPressed: () => context.pop(), child: const Text('Reintentar'))
+        ],
       ),
     );
   }

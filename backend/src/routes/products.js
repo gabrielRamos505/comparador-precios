@@ -14,15 +14,15 @@ const upload = multer({
     }
 });
 
-// ✅ BÚSQUEDA POR CÓDIGO DE BARRAS
-// Usamos optionalAuth: Si hay token, el servicio guarda historial. Si no, solo busca.
-router.get('/barcode/:barcode', optionalAuth, productController.searchByBarcode);
+// ✅ BÚSQUEDA POR CÓDIGO DE BARRAS (MODIFICADO A POST)
+// Ahora es POST para que Flutter pueda enviar { "image": "base64..." } en el body
+// si el escaneo de código de barras necesita el respaldo de la IA.
+router.post('/barcode/:barcode', optionalAuth, productController.searchByBarcode);
 
 // ✅ BÚSQUEDA POR TEXTO (Ej: "Coca Cola")
 router.get('/search', optionalAuth, productController.searchByName);
 
-// ✅ BÚSQUEDA POR IMAGEN (Unificada aquí)
-// Acepta 'image' como archivo (multipart/form-data) o como base64 en body
+// ✅ BÚSQUEDA POR IMAGEN (Identificación directa por IA)
 router.post('/identify', optionalAuth, upload.single('image'), productController.searchByImage);
 
 // ✅ HISTORIAL DE PRECIOS (Gráfica)

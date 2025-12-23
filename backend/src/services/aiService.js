@@ -18,15 +18,15 @@ class AIService {
             // 1. Limpieza base64
             const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
-            // 2. Configurar Modelo con MODO JSON (Mucho más estable)
+            // 2. Configurar Modelo con MODO JSON
             const model = this.genAI.getGenerativeModel({
-                model: 'gemini-flash-latest',
+                model: 'gemini-1.5-flash', // Recomendado: más rápido y estable para visión
                 generationConfig: {
                     responseMimeType: "application/json"
                 }
             });
 
-            // 3. Prompt optimizado para detectar CANTIDAD/PESO
+            // 3. Prompt optimizado
             const prompt = `Actúa como un experto en identificación de productos retail en Perú.
 Analiza esta imagen y extrae los datos para un comparador de precios.
 
@@ -41,10 +41,6 @@ REGLAS:
 - Si ves "Inca Kola", no pongas "Coca Cola". Sé preciso.
 - Prioriza leer el contenido neto (ej: 625ml).
 - Si la imagen es borrosa o no es un producto, responde con confidence: "low".
-
-EJEMPLOS:
-- Imagen: Botella de agua Cielo de 625ml -> {"productName": "Agua Cielo Sin Gas", "brand": "Cielo", "quantity": "625ml", "confidence": "high"}
-- Imagen: Paquete de Arroz Costeño -> {"productName": "Arroz Costeño Extra", "brand": "Costeño", "quantity": "750g", "confidence": "high"}
 
 Responde ÚNICAMENTE con el objeto JSON.`;
 
@@ -62,13 +58,12 @@ Responde ÚNICAMENTE con el objeto JSON.`;
 
             console.log('🤖 AI Raw Response:', text);
 
-            // 5. Parseo directo (Ya no necesitamos regex complejo gracias a JSON mode)
+            // 5. Parseo
             let aiData;
             try {
                 aiData = JSON.parse(text);
             } catch (e) {
                 console.error('❌ Error parsing JSON from AI:', e);
-                // Fallback por si acaso
                 const jsonMatch = text.match(/\{[\s\S]*\}/);
                 if (jsonMatch) aiData = JSON.parse(jsonMatch[0]);
             }
@@ -77,34 +72,36 @@ Responde ÚNICAMENTE con el objeto JSON.`;
                 console.warn('⚠️ AI: Low confidence or no product detected');
                 return {
                     success: false,
-                    productName: null,
+                    name: null,
                     error: 'No se pudo identificar el producto claramente'
                 };
             }
 
-            // 6. Construir nombre completo para la búsqueda
-            // Concatenamos la cantidad al nombre si existe, para ayudar a los scrapers
+            // 6. Construir nombre completo para la búsqueda (Tu lógica original)
             let finalSearchName = aiData.productName;
-            if (aiData.quantity && !finalSearchName.includes(aiData.quantity)) {
+            if (aiData.quantity && !finalSearchName.toLowerCase().includes(aiData.quantity.toLowerCase())) {
                 finalSearchName = `${finalSearchName} ${aiData.quantity}`;
             }
 
-            // Generar barcode temporal
+            // Generar barcode temporal (Tu lógica original)
             const timestamp = Date.now();
             const safeName = aiData.productName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10);
             const temporaryBarcode = `AI-${safeName}-${timestamp}`;
 
             console.log(`✅ AI Identified: "${finalSearchName}" (${aiData.confidence})`);
 
+            // Retornamos un objeto que el Aggregator y el Controller entiendan perfectamente
             return {
                 success: true,
-                productName: finalSearchName, // Este nombre irá a los scrapers
+                id: temporaryBarcode,
+                name: finalSearchName, // Nombre optimizado para scrapers
                 brand: aiData.brand,
                 quantity: aiData.quantity,
                 category: aiData.category,
                 confidence: aiData.confidence,
                 barcode: temporaryBarcode,
-                imageUrl: null // El frontend usará la foto que tomó el usuario
+                source: 'IA Vision',
+                imageUrl: null
             };
 
         } catch (error) {
@@ -120,15 +117,14 @@ Responde ÚNICAMENTE con el objeto JSON.`;
     validateImage(imageBase64) {
         if (!imageBase64 || typeof imageBase64 !== 'string') return false;
 
-        // Validar tamaño (aprox 5MB para ser más flexible con celulares modernos)
+        // El cálculo de tamaño que tienes es excelente, lo mantenemos.
         const sizeInBytes = 4 * Math.ceil((imageBase64.length / 3)) * 0.5624896334383812;
         const sizeInMB = sizeInBytes / (1024 * 1024);
 
-        if (sizeInMB > 6) { // Subí el límite a 6MB para evitar rechazos innecesarios
+        if (sizeInMB > 6) {
             console.warn(`⚠️ Imagen muy grande: ${sizeInMB.toFixed(2)}MB`);
             return false;
         }
-
         return true;
     }
 }

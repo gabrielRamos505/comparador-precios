@@ -7,20 +7,24 @@ const Product = require('../models/Product');         // ✅ Importar modelo
 class ProductController {
 
     // ---------------------------------------------------------
-    // BÚSQUEDA POR CÓDIGO DE BARRAS
+    // BÚSQUEDA POR CÓDIGO DE BARRAS (Con Soporte de Imagen de Respaldo)
     // ---------------------------------------------------------
     async searchByBarcode(req, res) {
         try {
             const { barcode } = req.params;
             const userId = req.user?.userId || null;
 
+            // 🆕 Recuperar imagen del body si el escáner falló
+            // Esto permite que el Aggregator use la IA si OFF no encuentra el barcode
+            let imageBase64 = null;
+            if (req.body && req.body.image) {
+                imageBase64 = req.body.image.replace(/^data:image\/\w+;base64,/, '');
+            }
+
             console.log(`🔍 Controller: Buscando barcode ${barcode} (User: ${userId})`);
 
-            // El servicio ya se encarga de:
-            // 1. Buscar en OpenFoodFacts
-            // 2. Buscar precios (Scraping)
-            // 3. Guardar en el historial (si hay userId)
-            const result = await productAggregatorService.searchByBarcode(barcode, userId);
+            // Pasamos el imageBase64 al servicio para que lo use como fallback
+            const result = await productAggregatorService.searchByBarcode(barcode, userId, imageBase64);
 
             res.json({
                 success: true,
@@ -50,8 +54,6 @@ class ProductController {
                 return res.status(400).json({ success: false, error: 'Se requiere un parámetro de búsqueda (query)' });
             }
 
-            // Aquí solo buscamos precios. No guardamos historial porque
-            // la búsqueda por texto suele ser exploratoria.
             const results = await productAggregatorService.searchByName(query);
 
             res.json({
@@ -64,7 +66,7 @@ class ProductController {
     }
 
     // ---------------------------------------------------------
-    // BÚSQUEDA POR IMAGEN
+    // BÚSQUEDA POR IMAGEN (IA Pura)
     // ---------------------------------------------------------
     async searchByImage(req, res) {
         try {
@@ -80,7 +82,7 @@ class ProductController {
                 return res.status(400).json({ success: false, error: 'Se requiere una imagen' });
             }
 
-            // 1. Validar
+            // 1. Validar usando tu lógica de aiService
             if (!aiService.validateImage(imageBase64)) {
                 return res.status(400).json({ success: false, error: 'Imagen inválida o muy pesada' });
             }
@@ -88,29 +90,28 @@ class ProductController {
             // 2. Identificar
             const aiResult = await aiService.identifyProduct(imageBase64);
 
-            if (!aiResult.success) {
-                return res.status(422).json({ success: false, error: aiResult.error || 'No se pudo identificar el producto' });
+            if (!aiResult || (aiResult.success === false)) {
+                return res.status(422).json({ success: false, error: 'No se pudo identificar el producto' });
             }
 
             // 3. Buscar precios
-            const searchResults = await productAggregatorService.searchByName(aiResult.productName);
+            const searchResults = await productAggregatorService.searchByName(aiResult.name);
 
-            // 4. Guardar en Historial (Lógica idéntica al AIController)
+            // 4. Guardar en Historial
             if (userId) {
                 try {
-                    // Usamos la mejor imagen disponible (de la tienda o null)
                     const bestImage = searchResults.length > 0 ? searchResults[0].imageUrl : null;
                     const brandFallback = searchResults.length > 0 ? searchResults[0].platform : 'Generico';
 
                     await historyService.addSearchHistory(
                         userId,
                         {
-                            name: aiResult.productName,
+                            name: aiResult.name,
                             brand: aiResult.brand || brandFallback,
-                            imageUrl: bestImage,
+                            imageUrl: aiResult.imageUrl || bestImage,
                             category: aiResult.category
                         },
-                        aiResult.barcode // Barcode temporal generado por AI
+                        aiResult.id // ID temporal de IA
                     );
                 } catch (hError) {
                     console.error('⚠️ Error guardando historial de imagen:', hError.message);
@@ -120,9 +121,9 @@ class ProductController {
             res.json({
                 success: true,
                 data: {
-                    identifiedProduct: aiResult.productName,
-                    confidence: aiResult.confidence,
-                    barcode: aiResult.barcode, // 👈 CRÍTICO: Para que Flutter lo reciba
+                    identifiedProduct: aiResult.name,
+                    confidence: aiResult.confidence || 'high',
+                    barcode: aiResult.id,
                     searchResults: searchResults,
                 },
             });
@@ -150,12 +151,11 @@ class ProductController {
             // 2. Obtener historial de precios
             const history = await PriceHistory.findAll({
                 where: { product_id: product.id },
-                order: [['recorded_at', 'ASC']], // Orden cronológico para gráficas
+                order: [['recorded_at', 'ASC']],
                 attributes: ['price', 'platform', 'recorded_at']
             });
 
-            // 3. Formatear para el frontend (Agrupar por tienda es útil para gráficas de líneas)
-            // Estructura: { "Plaza Vea": [{price: 10, date: ...}, ...], "Metro": [...] }
+            // 3. Formatear para el frontend
             const historyByPlatform = {};
 
             history.forEach(h => {
@@ -170,8 +170,8 @@ class ProductController {
 
             res.json({
                 success: true,
-                data: historyByPlatform, // Formato fácil para Chart.js
-                rawData: history // Datos crudos por si acaso
+                data: historyByPlatform,
+                rawData: history
             });
 
         } catch (error) {

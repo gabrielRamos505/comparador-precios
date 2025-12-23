@@ -47,13 +47,16 @@ GoRouter createRouter() {
         builder: (context, state) => const FavoritesScreen(),
       ),
       // 🆕 NUEVA RUTA: Búsqueda por IA
-      GoRoute(
-        path: '/ai-search',
-        builder: (context, state) {
-          final imagePath = state.extra as String;
-          return AISearchScreen(imagePath: imagePath);
-        },
-      ),
+GoRoute(
+  path: '/ai-search',
+  builder: (context, state) {
+    final Map<String, dynamic> extra = state.extra as Map<String, dynamic>;
+    return AISearchScreen(
+      imagePath: extra['imagePath'] as String,
+      initialBarcode: extra['barcode'] as String?, // Nota que aquí el scanner manda 'barcode'
+    );
+  },
+),
       GoRoute(
         path: '/notifications',
         builder: (context, state) => const NotificationsScreen(),

@@ -33,6 +33,43 @@ class AIService {
 
     return dio;
   }
+  /// Nuevo método: Búsqueda por Barcode con respaldo de Imagen
+  Future<Map<String, dynamic>> searchBarcodeWithImageFallback({
+    required String barcode,
+    required Uint8List imageBytes,
+    String? token,
+  }) async {
+    try {
+      print('🔍 Buscando barcode $barcode con respaldo de IA...');
+      
+      final base64Image = base64Encode(imageBytes);
+
+      final options = token != null
+          ? Options(headers: {'Authorization': 'Bearer $token'})
+          : null;
+
+      // Llamamos al endpoint POST que creamos en el backend
+      final response = await _dio.post(
+        '/products/barcode/$barcode', 
+        data: {
+          'image': base64Image, // Enviamos la foto por si el barcode falla
+        },
+        options: options,
+      );
+
+      if (response.data['success'] == true) {
+        // El backend devuelve { success: true, data: { ... } }
+        return response.data['data']; 
+      } else {
+        throw Exception(response.data['error'] ?? 'Producto no encontrado');
+      }
+
+    } on DioException catch (e) {
+      throw Exception(_handleDioError(e));
+    } catch (e) {
+      throw Exception('Error en búsqueda dual: $e');
+    }
+  }
 
   /// Identificar producto desde imagen usando Gemini Vision
   Future<Map<String, dynamic>> identifyProduct(
