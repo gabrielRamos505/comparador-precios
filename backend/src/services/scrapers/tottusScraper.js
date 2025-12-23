@@ -42,22 +42,23 @@ class TottusScraper {
                 }
             });
 
-            // ✅ URL CORREGIDA: Usar /tottus-pe/buscar?Ntt= en lugar de /buscar?q=
-            const url = `${this.baseUrl}/tottus-pe/buscar?Ntt=${encodeURIComponent(query)}`;
+            // ✅ URL de búsqueda
+            const searchUrl = `${this.baseUrl}/tottus-pe/buscar?Ntt=${encodeURIComponent(query)}`;
 
             // Timeout optimizado: 20s con domcontentloaded
             try {
-                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+                await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
             } catch (e) {
                 console.log('      ⚠️ Tottus: Timeout al cargar página (20s)');
                 return [];
             }
 
-            // Esperar un poco para que se cargue el contenido (usar setTimeout en lugar de waitForTimeout)
+            // Esperar un poco para que se cargue el contenido
             await new Promise(resolve => setTimeout(resolve, 3000));
 
             // ✅ EXTRACCIÓN MEJORADA: Usar JSON-LD structured data
-            const products = await page.evaluate(() => {
+            // IMPORTANTE: Pasamos searchUrl como parámetro para usarlo dentro del evaluate
+            const products = await page.evaluate((fallbackUrl) => {
                 const items = [];
 
                 try {
@@ -83,13 +84,32 @@ class TottusScraper {
                                         const price = parseFloat(product.offers.price || product.offers.lowPrice || 0);
 
                                         if (price > 0) {
+                                            // ✅ FIX CRÍTICO: Manejo correcto de URLs
+                                            let productUrl = product.url || product.offers.url || '';
+
+                                            if (productUrl) {
+                                                if (productUrl.startsWith('http://') || productUrl.startsWith('https://')) {
+                                                    // Ya tiene protocolo completo
+                                                    // NO hacer nada
+                                                } else if (productUrl.startsWith('/')) {
+                                                    // Es ruta relativa con barra inicial
+                                                    productUrl = `https://www.tottus.com.pe${productUrl}`;
+                                                } else {
+                                                    // Es ruta relativa sin barra
+                                                    productUrl = `https://www.tottus.com.pe/${productUrl}`;
+                                                }
+                                            } else {
+                                                // Si no tiene URL, usar la URL de búsqueda como fallback
+                                                productUrl = fallbackUrl;
+                                            }
+
                                             items.push({
-                                                id: product.sku || `tottus-${Math.random().toString(36).substr(2, 9)}`, // ✅ FIX: Agregar ID requerido por Flutter
+                                                id: product.sku || `tottus-${Math.random().toString(36).substr(2, 9)}`,
                                                 platform: 'Tottus',
                                                 name: product.name,
                                                 price: price,
                                                 currency: 'PEN',
-                                                url: product.url || product.offers.url || window.location.href,
+                                                url: productUrl, // ✅ URL ya procesada correctamente
                                                 imageUrl: product.image || null,
                                                 available: true,
                                                 shipping: 0
@@ -107,7 +127,7 @@ class TottusScraper {
                 }
 
                 return items;
-            });
+            }, searchUrl); // ✅ CRÍTICO: Pasar searchUrl como parámetro al evaluate
 
             if (products.length > 0) {
                 console.log(`      ✅ Tottus: ${products.length} encontrados (Min: S/ ${Math.min(...products.map(p => p.price)).toFixed(2)})`);

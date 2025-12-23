@@ -2,7 +2,6 @@ const openFoodFactsService = require('./openFoodFactsService');
 const serpApiService = require('./serpApiService');
 const mercadoLibreService = require('./mercadoLibreService');
 
-
 // Importar Scrapers
 const plazaVeaScraper = require('./scrapers/plazaVeaScraper');
 const wongScraper = require('./scrapers/wongScraper');
@@ -10,7 +9,6 @@ const metroScraper = require('./scrapers/metroScraper');
 const tottusScraper = require('./scrapers/tottusScraper');
 const historyService = require('./historyService');
 const aiService = require('./aiService');
-
 
 class ProductAggregatorService {
 
@@ -53,11 +51,9 @@ class ProductAggregatorService {
                 console.log('   ⚠️ No encontrado en OpenFoodFacts. Intentando fallback (Objetos)...');
 
                 // Intentamos buscar el código en Google Shopping/Amazon a través de SerpAPI
-                // A veces Google reconoce el código y devuelve el producto
                 const fallbackResults = await serpApiService.searchAllPlatforms(barcode);
 
                 if (fallbackResults && fallbackResults.length > 0) {
-                    // Tomamos el primer resultado como la "identificación" del producto
                     const bestMatch = fallbackResults[0];
                     console.log(`   ✅ Identificado por Fallback: "${bestMatch.name}"`);
 
@@ -65,7 +61,7 @@ class ProductAggregatorService {
                         id: barcode,
                         barcode: barcode,
                         name: bestMatch.name,
-                        brand: bestMatch.platform, // Usamos la tienda como "brand" temporal
+                        brand: bestMatch.platform,
                         imageUrl: bestMatch.imageUrl,
                         source: 'Web Search Fallback'
                     };
@@ -184,8 +180,8 @@ class ProductAggregatorService {
         allPrices.sort((a, b) => a.price - b.price);
         const uniquePrices = this.removeDuplicates(allPrices);
 
-        // ✅ VALIDAR Y ARREGLAR URLs ANTES DE RETORNAR
-        const validatedPrices = this.validateAndFixUrls(uniquePrices, productName);
+        // ✅ VALIDAR URLs (solo verificar, NO reemplazar)
+        const validatedPrices = this.validateUrls(uniquePrices, productName);
 
         console.log(`\n${'='.repeat(60)}`);
         console.log(`💰 RESULTADO FINAL: ${validatedPrices.length} opciones encontradas`);
@@ -219,36 +215,36 @@ class ProductAggregatorService {
     }
 
     /**
-     * ✅ VALIDAR Y ARREGLAR URLs
-     * Asegura que todos los productos tengan URLs válidas y accesibles
+     * ✅ VALIDAR URLs (Verificar si son válidas, agregar fallback solo si falta)
      */
-    validateAndFixUrls(products, searchQuery) {
+    validateUrls(products, searchQuery) {
         return products.map(product => {
-            // Si la URL es inválida, null, undefined, o no empieza con http
+            // Si NO tiene URL o es inválida, generar una URL de búsqueda
             if (!product.url ||
                 product.url === 'null' ||
                 product.url === 'undefined' ||
                 !product.url.startsWith('http')) {
 
+                console.log(`   ⚠️ URL inválida en ${product.platform} para "${product.name}"`);
+
                 // Generar URL de búsqueda según la tienda
                 const encodedQuery = encodeURIComponent(searchQuery);
+
                 const storeUrls = {
-                    'Metro': `https://www.metro.pe/${encodedQuery}`,
-                    'Plaza Vea': `https://www.plazavea.com.pe/${encodedQuery}`,
-                    'Wong': `https://www.wong.pe/${encodedQuery.toLowerCase().replace(/%20/g, '+')}?_q=${encodedQuery.toLowerCase().replace(/%20/g, '+')}&map=ft`,
+                    'Metro': `https://www.metro.pe/${encodedQuery}?_q=${encodedQuery}&map=ft`,
+                    'Plaza Vea': `https://www.plazavea.com.pe/${encodedQuery}?_q=${encodedQuery}&map=ft`,
+                    'Wong': `https://www.wong.pe/${encodedQuery}?_q=${encodedQuery}&map=ft`,
                     'Tottus': `https://www.tottus.com.pe/tottus-pe/buscar?Ntt=${encodedQuery}`,
-                    'Google Shopping': product.url || `https://www.google.com/search?q=${encodedQuery}+precio+peru`,
-                    'Mercado Libre': `https://listado.mercadolibre.com.pe/${encodedQuery}`
+                    'Google Shopping': `https://www.google.com/search?q=${encodedQuery}+precio+peru&tbm=shop`,
+                    'Mercado Libre': `https://listado.mercadolibre.com.pe/${encodedQuery.replace(/%20/g, '-')}`
                 };
 
-                const fallbackUrl = storeUrls[product.platform] || `https://www.google.com/search?q=${encodedQuery}+${product.platform}`;
-
-                console.log(`   🔗 URL faltante en ${product.platform}, usando fallback`);
-                product.url = fallbackUrl;
+                product.url = storeUrls[product.platform] || `https://www.google.com/search?q=${encodedQuery}+${product.platform}+peru`;
+                console.log(`   🔗 URL generada: ${product.url}`);
             }
 
             return product;
-        }).filter(p => p.url && p.url.startsWith('http')); // Solo retornar productos con URLs válidas
+        }).filter(p => p.url && p.url.startsWith('http'));
     }
 
     async searchMercadoLibre(productName) {
@@ -289,8 +285,6 @@ class ProductAggregatorService {
 
         try {
             // PROMISE.ALL: Ejecutamos TODOS en paralelo
-            // Metro/PV consumen 0 CPU (API). Wong/Tottus consumen CPU (Puppeteer).
-            // Esto reduce el tiempo total de Suma(Tiempos) a Max(Tiempos).
             const promises = stores.map(store =>
                 store.scraper.searchProducts(productName)
                     .then(products => ({
@@ -330,6 +324,5 @@ class ProductAggregatorService {
         return results;
     }
 }
-
 
 module.exports = new ProductAggregatorService();

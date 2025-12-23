@@ -2,7 +2,6 @@ const axios = require('axios');
 
 class WongScraper {
     constructor() {
-        // Wong usa VTEX, similar a Metro y Plaza Vea
         this.baseUrl = 'https://www.wong.pe/api/catalog_system/pub/products/search';
     }
 
@@ -16,7 +15,7 @@ class WongScraper {
             const response = await axios.get(url, {
                 timeout: 8000,
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Accept': 'application/json, text/plain, */*',
                     'Referer': 'https://www.wong.pe/',
                     'Origin': 'https://www.wong.pe'
@@ -31,33 +30,41 @@ class WongScraper {
             const products = response.data.slice(0, 10).map(item => {
                 const price = item.items[0]?.sellers[0]?.commertialOffer?.Price || 0;
 
-                // ✅ FIX: VTEX API ya retorna URLs completas, no agregar baseUrl si ya tiene protocolo
+                // ✅ FIX CRÍTICO: Manejo correcto de URLs
                 let link = item.link;
                 if (link) {
-                    // Si el link no empieza con http, agregar el baseUrl
-                    if (!link.startsWith('http')) {
+                    if (link.startsWith('http://') || link.startsWith('https://')) {
+                        // Ya tiene protocolo completo
+                        // NO hacer nada
+                    } else if (link.startsWith('/')) {
+                        // Es ruta relativa con barra inicial
                         link = `https://www.wong.pe${link}`;
+                    } else {
+                        // Es ruta relativa sin barra
+                        link = `https://www.wong.pe/${link}`;
                     }
-                    // Si ya tiene http, usarlo tal cual (evita duplicación)
+                } else {
+                    // Si no tiene link, generar URL de búsqueda
+                    link = `https://www.wong.pe/${encodedQuery}?_q=${encodedQuery}&map=ft`;
                 }
 
                 return {
-                    id: item.productId || `wong-${Math.random().toString(36).substr(2, 9)}`, // ✅ FIX: Agregar ID requerido por Flutter
+                    id: item.productId || `wong-${Date.now()}-${Math.random()}`,
                     platform: 'Wong',
                     name: item.productName,
                     price: price,
                     currency: 'PEN',
-                    url: link,
+                    url: link, // ✅ URL ya procesada correctamente
                     imageUrl: item.items[0]?.images[0]?.imageUrl,
                     shipping: 0,
                     available: true,
                 };
-            }).filter(item => item !== null);
+            }).filter(item => item.price > 0);
 
             if (products.length > 0) {
                 console.log(`      ✅ Wong: ${products.length} encontrados (Min: S/ ${Math.min(...products.map(p => p.price)).toFixed(2)})`);
             } else {
-                console.log(`      ⚠️ Wong: Sin resultados`);
+                console.log(`      ⚠️ Wong: Sin productos con precio válido`);
             }
 
             return products;

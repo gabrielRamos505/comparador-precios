@@ -1,10 +1,9 @@
 const axios = require('axios');
-const productNameCleaner = require('../utils/productNameCleaner');
 
 class OpenFoodFactsService {
     constructor() {
-        // ✅ Usar el dominio de Perú para priorizar datos locales
-        this.baseUrl = 'https://pe.openfoodfacts.org/api/v2';
+        // ✅ CAMBIO CRÍTICO: Usar base de datos MUNDIAL (tiene más productos)
+        this.baseUrl = 'https://world.openfoodfacts.org/api/v2';
     }
 
     async getProductByBarcode(barcode) {
@@ -15,68 +14,41 @@ class OpenFoodFactsService {
                 `${this.baseUrl}/product/${barcode}.json`,
                 {
                     headers: {
-                        // ⚠️ OFF es estricto. Usa un UA descriptivo con contacto si es posible
-                        'User-Agent': 'ComparadorRA - App - Version 1.0 - (tu_email@gmail.com)',
+                        'User-Agent': 'ComparadorRA - App - Version 1.0',
                     },
-                    timeout: 5000 // Timeout corto, si falla pasamos a otra cosa
+                    timeout: 8000
                 }
             );
 
             if (response.data.status === 1) {
                 const product = response.data.product;
 
-                // 1. Obtener datos crudos
-                const originalName = product.product_name || product.product_name_es || 'Producto desconocido';
-                let brand = product.brands || '';
-                const quantity = product.quantity || product.product_quantity || ''; // Ej: "500 ml"
+                // 1️⃣ EXTRACCIÓN INTELIGENTE DEL NOMBRE
+                const originalName = this._extractBestName(product);
 
-                // ✅ FIX: Si la marca está vacía, intentar extraerla del nombre del producto
-                if (!brand && originalName) {
-                    const nameLower = originalName.toLowerCase();
-                    // Marcas comunes en Perú
-                    if (nameLower.includes('cielo')) brand = 'Cielo';
-                    else if (nameLower.includes('san luis')) brand = 'San Luis';
-                    else if (nameLower.includes('san mateo')) brand = 'San Mateo';
-                    else if (nameLower.includes('coca cola') || nameLower.includes('coca-cola')) brand = 'Coca-Cola';
-                    else if (nameLower.includes('inca kola')) brand = 'Inca Kola';
-                    else if (nameLower.includes('pepsi')) brand = 'Pepsi';
-                    else if (nameLower.includes('sprite')) brand = 'Sprite';
-                    else if (nameLower.includes('fanta')) brand = 'Fanta';
-                }
+                // 2️⃣ EXTRACCIÓN DE MARCA (sin hardcodear)
+                const brand = this._extractBrand(product, originalName);
 
-                // 2. Limpieza inteligente
-                // Si la marca es "Aje" y es agua, probablemente es "Cielo"
-                let brandCorrection = brand;
-                if (brand.toLowerCase().includes('aje') && originalName.toLowerCase().includes('agua')) {
-                    brandCorrection = 'Cielo';
-                }
+                // 3️⃣ EXTRACCIÓN DE CANTIDAD
+                const quantity = product.quantity || product.product_quantity || '';
 
-                let cleanedName = productNameCleaner.clean(originalName, brandCorrection);
-
-                // Si cleanedName es muy corto o genérico, intentamos mejorarlo
-                if (cleanedName.length < 10 && !cleanedName.toLowerCase().includes(brandCorrection.toLowerCase())) {
-                    cleanedName = `${brandCorrection} ${cleanedName}`;
-                }
-
-                // Si la cantidad no está en el nombre limpio, la agregamos para ayudar a los scrapers
-                if (quantity && !cleanedName.toLowerCase().includes(quantity.toLowerCase())) {
-                    cleanedName = `${cleanedName} ${quantity}`;
-                }
+                // 4️⃣ CONSTRUCCIÓN DEL NOMBRE DE BÚSQUEDA
+                const searchName = this._buildSearchName(originalName, brand, quantity);
 
                 console.log(`📦 Producto OpenFoodFacts:`);
                 console.log(`   Original: "${originalName}"`);
+                console.log(`   Marca: "${brand}"`);
                 console.log(`   Cantidad: "${quantity}"`);
-                console.log(`   Marca/Corección: "${brandCorrection}"`);
-                console.log(`   Búsqueda: "${cleanedName}"`);
+                console.log(`   Búsqueda: "${searchName}"`);
 
                 return {
                     id: product.code || barcode,
                     barcode: barcode,
-                    name: cleanedName, // Nombre optimizado para buscar en PlazaVea, Metro, etc.
+                    name: searchName, // 🎯 Este nombre va a los scrapers
                     nameOriginal: originalName,
                     brand: brand,
-                    quantity: quantity, // ✅ Importante para calcular precio por unidad
-                    category: product.categories || null,
+                    quantity: quantity,
+                    category: this._extractCategory(product),
                     imageUrl: product.image_url || product.image_front_url || null,
                     description: product.generic_name || null,
                     nutritionGrade: product.nutrition_grades || null,
@@ -97,10 +69,145 @@ class OpenFoodFactsService {
         }
     }
 
+    /**
+     * 🧠 MÉTODO INTELIGENTE: Extrae el mejor nombre disponible
+     */
+    _extractBestName(product) {
+        // Prioridad: Nombre en español > Nombre en inglés > Nombre genérico
+        const candidates = [
+            product.product_name_es,
+            product.product_name_es_PE, // Específico de Perú
+            product.product_name,
+            product.product_name_en,
+            product.generic_name_es,
+            product.generic_name,
+            product.brands // Fallback extremo
+        ];
+
+        for (const name of candidates) {
+            if (name && typeof name === 'string' && name.trim().length > 3) {
+                return name.trim();
+            }
+        }
+
+        return 'Producto desconocido';
+    }
+
+    /**
+     * 🏷️ MÉTODO INTELIGENTE: Extrae la marca sin hardcodear
+     */
+    _extractBrand(product, productName) {
+        // 1. Intentar obtener marca del campo oficial
+        if (product.brands && product.brands.trim()) {
+            // Limpiar: "Gloria,Nestlé" → "Gloria"
+            const mainBrand = product.brands.split(',')[0].trim();
+            if (mainBrand) return mainBrand;
+        }
+
+        // 2. Intentar extraer del nombre usando mayúsculas
+        const words = productName.split(' ');
+        for (const word of words) {
+            // Si una palabra está toda en mayúsculas y tiene más de 2 letras, probablemente es la marca
+            if (word === word.toUpperCase() && word.length > 2 && /^[A-Z]+$/.test(word)) {
+                return word;
+            }
+        }
+
+        // 3. Tomar la primera palabra como marca (común en productos)
+        const firstWord = words[0];
+        if (firstWord && firstWord.length > 2) {
+            // Capitalizar: "gloria" → "Gloria"
+            return firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
+        }
+
+        return null;
+    }
+
+    /**
+     * 🏗️ MÉTODO INTELIGENTE: Construye nombre óptimo para búsqueda
+     */
+    _buildSearchName(originalName, brand, quantity) {
+        let searchName = originalName;
+
+        // ✅ REGLA 1: Si la marca NO está en el nombre, agregarla al inicio
+        if (brand && !searchName.toLowerCase().includes(brand.toLowerCase())) {
+            searchName = `${brand} ${searchName}`;
+        }
+
+        // ✅ REGLA 2: Si la cantidad NO está en el nombre, agregarla
+        if (quantity && !searchName.toLowerCase().includes(quantity.toLowerCase())) {
+            // Limpiar cantidad: "1 kg" → "1kg"
+            const cleanQuantity = quantity.replace(/\s+/g, '').toLowerCase();
+            searchName = `${searchName} ${cleanQuantity}`;
+        }
+
+        // ✅ REGLA 3: Limpieza suave (solo caracteres extraños, mantener palabras clave)
+        searchName = searchName
+            .replace(/[^\w\sáéíóúñ.]/gi, ' ') // Permitir acentos y puntos
+            .replace(/\s+/g, ' ') // Múltiples espacios → 1 espacio
+            .trim();
+
+        // ✅ REGLA 4: Límite de longitud (máximo 6 palabras)
+        const words = searchName.split(' ');
+        if (words.length > 6) {
+            searchName = words.slice(0, 6).join(' ');
+        }
+
+        return searchName;
+    }
+
+    /**
+     * 📂 MÉTODO: Extrae categoría inteligente
+     */
+    _extractCategory(product) {
+        const categories = product.categories || '';
+        const categoriesLower = categories.toLowerCase();
+
+        // Mapeo de categorías OFF → Categorías locales
+        const categoryMap = {
+            'yogurt': 'Lácteos',
+            'yoghurt': 'Lácteos',
+            'leche': 'Lácteos',
+            'queso': 'Lácteos',
+            'mantequilla': 'Lácteos',
+            'agua': 'Bebidas',
+            'gaseosa': 'Bebidas',
+            'jugo': 'Bebidas',
+            'refresco': 'Bebidas',
+            'cerveza': 'Bebidas',
+            'vino': 'Bebidas',
+            'arroz': 'Abarrotes',
+            'fideo': 'Abarrotes',
+            'pasta': 'Abarrotes',
+            'aceite': 'Abarrotes',
+            'conserva': 'Abarrotes',
+            'galleta': 'Snacks',
+            'chocolate': 'Snacks',
+            'dulce': 'Snacks',
+            'caramelo': 'Snacks',
+            'shampoo': 'Higiene Personal',
+            'jabón': 'Higiene Personal',
+            'pasta dental': 'Higiene Personal',
+            'detergente': 'Limpieza',
+            'lejía': 'Limpieza',
+            'limpiador': 'Limpieza',
+        };
+
+        for (const [keyword, category] of Object.entries(categoryMap)) {
+            if (categoriesLower.includes(keyword)) {
+                return category;
+            }
+        }
+
+        return 'General';
+    }
+
+    /**
+     * 🔍 BÚSQUEDA POR TEXTO (mantener para compatibilidad)
+     */
     async searchProducts(query) {
         try {
-            // Usamos el endpoint clásico de búsqueda que es más flexible
-            const searchUrl = `https://pe.openfoodfacts.org/cgi/search.pl`;
+            const searchUrl = `https://world.openfoodfacts.org/cgi/search.pl`;
 
             const response = await axios.get(searchUrl, {
                 params: {
@@ -118,18 +225,17 @@ class OpenFoodFactsService {
 
             if (response.data.products && response.data.products.length > 0) {
                 return response.data.products.map(product => {
-                    const originalName = product.product_name || product.product_name_es || 'Sin nombre';
+                    const originalName = this._extractBestName(product);
+                    const brand = this._extractBrand(product, originalName);
                     const quantity = product.quantity || '';
-
-                    let cleanedName = productNameCleaner.clean(originalName, product.brands);
-                    if (quantity) cleanedName += ` ${quantity}`;
+                    const searchName = this._buildSearchName(originalName, brand, quantity);
 
                     return {
                         id: product.code,
                         barcode: product.code,
-                        name: cleanedName,
+                        name: searchName,
                         nameOriginal: originalName,
-                        brand: product.brands || null,
+                        brand: brand,
                         quantity: quantity,
                         imageUrl: product.image_url || null,
                         source: 'Open Food Facts',

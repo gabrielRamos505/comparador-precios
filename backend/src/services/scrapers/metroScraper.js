@@ -32,13 +32,31 @@ class MetroScraper {
                 const seller = item.items[0]?.sellers[0]?.commertialOffer;
                 if (!seller || !seller.AvailableQuantity) return null;
 
+                // ✅ FIX CRÍTICO: Manejo correcto de URLs
+                let link = item.link;
+                if (link) {
+                    if (link.startsWith('http://') || link.startsWith('https://')) {
+                        // Ya tiene protocolo completo, usar tal cual
+                        // NO hacer nada
+                    } else if (link.startsWith('/')) {
+                        // Es ruta relativa con barra inicial: "/producto/abc"
+                        link = `https://www.metro.pe${link}`;
+                    } else {
+                        // Es ruta relativa sin barra: "producto/abc"
+                        link = `https://www.metro.pe/${link}`;
+                    }
+                } else {
+                    // Si no tiene link, generar URL de búsqueda
+                    link = `https://www.metro.pe/${encodedQuery}?_q=${encodedQuery}&map=ft`;
+                }
+
                 return {
                     id: item.productId,
                     platform: 'Metro',
                     name: item.productName,
                     price: seller.Price,
                     currency: 'PEN',
-                    url: item.link,
+                    url: link, // ✅ URL ya procesada correctamente
                     imageUrl: item.items[0]?.images[0]?.imageUrl,
                     shipping: 0,
                     available: true,
